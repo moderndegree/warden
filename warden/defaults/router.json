@@ -545,5 +545,34 @@
         "key": "openrouter"
       }
     }
+  },
+  "_escalation_comment": "warden escalate: one lev yes/no over the task + what the local agent tried. Rule signals in the summary: needs_person (a bigger model can't help) and done (without stuck) keep it local and skip lev. Regexes, case-insensitive.",
+  "escalation": {
+    "question": "Should this task be handed off to a more capable frontier AI model now, rather than letting the local agent keep trying?",
+    "threshold": 0.5,
+    "state_chars": 2400,
+    "signals": {
+      "stuck": [
+        "\\bsame (\\w+ )?\\w*(error|exception|failure|problem|feedback)\\b",
+        "\\bstill (fails?|failing|broken|wrong|grows|unchanged|there)\\b",
+        "\\b(not sure|unsure|no idea|out of ideas|lost track|not (confident|certain))\\b",
+        "\\b(can'?t|couldn'?t|could not|cannot) (find|see|figure|reproduce|tell)\\b",
+        "\\b(reverted|rolled back)\\b",
+        "\\bkeep (appearing|failing|coming)\\b"
+      ],
+      "done": [
+        "\\b(all )?(\\d+ )?tests? (now )?pass(es|ed)?\\b",
+        "\\b(confirmed|approved) (it|that)\\b",
+        "\\b(it )?works now\\b",
+        "\\blooks right\\b"
+      ],
+      "needs_person": [
+        "\\b(needs?|requires?) (sudo|root|the user)\\b",
+        "\\bnot (allowed|permitted) to\\b",
+        "\\bpermission denied\\b",
+        "\\bnetwork (is )?(unreachable|down)\\b|\\bno internet\\b",
+        "\\bwaiting (on|for) the user\\b"
+      ]
+    }
   }
 }

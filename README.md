@@ -5,6 +5,7 @@ A local guard and decision engine for AI agents, built on the small local decisi
 
 - **Guard**: inspects text at a boundary and says what to do with it.
 - **Classify**: what expertise a prompt needs and what the user wants done (2 lev calls).
+- **Escalate**: should a local agent hand a task to a frontier model now? (one lev call, or none)
 - **Decide**: offloads bulk yes/no, choice, and score decisions from big models to lev.
 - **Router** (experimental): picks an agent and model for a prompt.
 - **Test bed**: a local UI for all of the above.
@@ -169,6 +170,32 @@ warden answers with that pair, and consumers map it to a concrete harness. Label
   shows tier accuracy, agent accuracy, local-vs-frontier with frontier recall and precision, confusion matrices,
   and majority baselines. lev answers are cached in `evals/cache.sqlite`.
 
+## Escalate
+
+```bash
+echo "Edited auth.py 3 times; same AssertionError every run. Not sure why." | warden escalate --brief -t "Fix the failing test"
+# escalate p=0.85 · lev: hand off (p=0.85 ≥ 0.5)
+```
+
+- **One lev yes/no** over the task and the agent's summary of what it tried. Both are redacted and framed as data.
+- **Rule signals** in the summary come first:
+  - **needs a person** (sudo or permissions, no network, waiting on the user) means stay local: a bigger model
+    can't help, so the reason says to ask the user.
+  - **clear success** without signs of being stuck means stay local.
+
+  When either applies, lev isn't asked at all.
+- **If lev is down,** the answer is *stay local* with `error` set, and the exit code is 1.
+- **Eval:** `evals/escalation/seed.jsonl` has 60 drafted (task, tried) pairs with a fixed tune/test split. You
+  confirm or flip each draft in the test bed (Labels → escalation). Then run
+  `python3 evals/eval_escalation.py tune [--questions] [--grid]` while tuning and `… test` once.
+- **Preliminary (tune split, Claude's drafted labels, not yours):**
+  - lev alone 29/30;
+  - rules alone 24/30;
+  - rules + lev 30/30, at 0.83 lev calls per item.
+
+  The configured question beat three alternative phrasings (28–29/30), and the threshold barely matters
+  (bimodal scores). The drafts are cleaner than real agent summaries, so expect lower numbers on real ones.
+
 ## Availability
 
 A route never points at something that can't run right now. Every check is local:
@@ -198,6 +225,7 @@ A route never points at something that can't run right now. Every check is local
 | `warden redact` | Print redacted text; counts go to stderr | 0 nothing removed · 3 redacted |
 | `warden decide -q Q [-k kind] [-o id=desc …] [-l level …] [-c context] [--brief]` | One question per item (stdin lines, args, or `-f`) | |
 | `warden classify [--sensitivity] [--guard] [--brief]` | Expert + mode (+ sensitivity) and the workflow they map to | 0 ok · 4 stopped by `--guard` · 1 lev down |
+| `warden escalate -t TASK [TRIED \| -f FILE \| stdin] [--brief]` | Hand off to a frontier model? | 0 stay local · 3 escalate · 1 error |
 | `warden route` | Experimental router; prints JSON | |
 | `warden eval [--sets …] [--no-lev]` | Measure the guard | |
 | `warden health [--brief]` | Check the config, lev, and what routes can use | 0 lev up · 1 lev down |
@@ -235,12 +263,12 @@ Hardening:
 ## Layout
 
 ```
-warden/          rules.py · lev.py · guard.py · classify.py · decide.py · labels.py · router.py (+ router_logic.py) · evaluate.py · feedback.py · cli.py
+warden/          rules.py · lev.py · guard.py · classify.py · escalate.py · availability.py · decide.py · labels.py · router.py (+ router_logic.py) · evaluate.py · feedback.py · cli.py
 warden/defaults/ guard.json · router.json
 warden/testbed/  server.py · static/
 skill/warden/    SKILL.md (not installed)
-evals/           samples.json (dev) · fetch.py · analyze.py (tuning workbench) · eval_router.py · eval_routing.py · routing/seed.jsonl · data/, reports/, cache.sqlite (git-ignored)
-tests/           rules · guard · classify · decide · router · labels · cli · testbed · perf (ReDoS) · fuzz (stubbed lev)
+evals/           samples.json (dev) · fetch.py · analyze.py (tuning workbench) · eval_router.py · eval_routing.py · eval_escalation.py · routing/, escalation/ (seed.jsonl) · data/, reports/, cache.sqlite (git-ignored)
+tests/           rules · guard · classify · escalate · availability · decide · router · labels · cli · testbed · perf (ReDoS) · fuzz (stubbed lev)
 ```
 
 ## Known limits

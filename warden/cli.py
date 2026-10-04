@@ -5,13 +5,14 @@
   warden decide   -q QUESTION [-k yes_no|choice|score] [-o id=description ...] [-l level ...]
                   [-c CONTEXT] [ITEM ... | -f FILE (one item per line, or a JSON array)] [--brief]
   warden classify [TEXT | -f FILE | stdin] [--sensitivity] [--guard] [--brief]
+  warden escalate -t TASK [TRIED | -f FILE | stdin] [--brief]
   warden route    [TEXT | -f FILE | stdin]            (experimental)
   warden eval     [--sets dev,feedback,gandalf,jailbreak,neuralchemy,pairs,safeguard,ipi,web] [--no-lev]
   warden health   [--brief]
   warden testbed  [--port 8740]
 
 Exit codes (scan): 0 allow · 3 review · 4 block · 1 error · 2 usage. (redact): 0 nothing removed · 3 redacted.
-(classify): 0 classified · 4 stopped by --guard · 1 lev unavailable.
+(classify): 0 classified · 4 stopped by --guard · 1 lev unavailable. (escalate): 0 stay local · 3 escalate · 1 error.
 """
 import argparse
 import json
@@ -98,6 +99,13 @@ def cmd_classify(args):
     return 4 if r["stopped"] else 1 if r["error"] else 0
 
 
+def cmd_escalate(args):
+    from .escalate import brief, escalate
+    r = escalate(args.task, _text(args))
+    print(brief(r)) if args.brief else _out(r)
+    return 1 if r["error"] else 3 if r["escalate"] else 0
+
+
 def cmd_route(args):
     from .router import route
     _out(route(_text(args)))
@@ -175,6 +183,13 @@ def main(argv=None):
     p.add_argument("--guard", action="store_true", help="run the prompt guard first; stop on block (+2 lev calls)")
     p.add_argument("--brief", action="store_true", help="one-line summary instead of JSON")
     p.set_defaults(fn=cmd_classify)
+
+    p = sub.add_parser("escalate", help="should a local agent hand this task to a frontier model? exit 3 = yes")
+    p.add_argument("-t", "--task", required=True, help="the task the local agent was given")
+    p.add_argument("text", nargs="*", help="short summary of what it tried (default: -f FILE or stdin)")
+    p.add_argument("-f", "--file", help="read the summary from FILE")
+    p.add_argument("--brief", action="store_true", help="one-line summary instead of JSON")
+    p.set_defaults(fn=cmd_escalate)
 
     p = sub.add_parser("route", help="(experimental) pick agent + model for a prompt")
     text_args(p)

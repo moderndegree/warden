@@ -79,10 +79,11 @@ function show() {
   const it = S.order[S.pos];
   S.current = it.id;
   const prev = S.data.labels[it.id];
-  S.draft = prev ? { ...prev.label } : {};
+  S.draft = prev ? { ...prev.label } : typeof it.draft === "boolean" ? { escalate: it.draft } : {};
   $("item-id").textContent = it.id;
   $("item-area").textContent = it.area || "";
-  $("item-pos").textContent = `${S.pos + 1} of ${S.order.length}${prev ? " · labelled " + summary(S.kind, prev.label) : ""}`;
+  $("item-pos").textContent = `${S.pos + 1} of ${S.order.length}${prev ? " · labelled " + summary(S.kind, prev.label)
+    : typeof it.draft === "boolean" ? ` · Claude's draft: ${it.draft ? "escalate" : "stay local"} (confirm or flip)` : ""}`;
   $("item").replaceChildren(el("pre", { class: "redacted" }, itemText(it)));
   $("unsure").checked = !!(prev && prev.label.unsure);
   $("note").value = prev ? prev.note || "" : "";
