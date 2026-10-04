@@ -55,7 +55,7 @@ class Router(unittest.TestCase):
         self.assertEqual(lev.asked, [])
 
     def test_agent_from_expert_and_mode(self):
-        cases = [("software", "make", "code_build"), ("software", "plan", "code_plan"), ("devops", "answer", "tech_qa"),
+        cases = [("software", "make", "code_build"), ("software", "plan", "code_plan"), ("devops", "answer", "code_build"),
                  ("research", "lookup", "research"), ("home", "act", "voice_home"), ("writing", "make", "assistant")]
         for expert, mode, want in cases:
             r, _ = self.run_("Do the thing.", expert=expert, mode=mode)
@@ -120,7 +120,7 @@ class Router(unittest.TestCase):
         self.assertTrue(any(x.startswith("No local option available") for x in r["routing"]["reasons"]))
 
     def test_free_tier_excluded_for_pii(self):
-        r, _ = self.run_("My email is bob@example.com, what is a monad?", mode="answer", complexity=0.0)
+        r, _ = self.run_("My email is bob@example.com, what is a monad?", expert="writing", mode="answer", complexity=0.0)
         free = [x for x in r["routing"]["table"] if x["route"] == "free"]
         self.assertTrue(free and not any(x["eligible"] for x in free))
 

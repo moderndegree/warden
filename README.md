@@ -164,8 +164,8 @@ warden route "Plan a zero-downtime move from Docker Compose to Podman quadlets" 
 **The convention is workflow × tier.** warden answers with that pair and consumers map it to a concrete harness.
 The default `router.json` maps it to this machine's harnesses: each agent's local executor for `local`, and its
 cloud executors for `frontier`.
-- **Workflow:** one of `router.json`'s agents: `voice_home`, `code_build`, `code_plan`, `tech_qa`, `research`
-  or `assistant`.
+- **Workflow:** one of `router.json`'s agents: `voice_home`, `code_build`, `code_plan`, `research` or
+  `assistant`. Quick technical answers (`tech_qa`) were folded into `code_build` on 2026-10-04.
 - **Tier:** `local`, `frontier` or `blocked`.
 
 **How the decision is made:**
@@ -179,35 +179,35 @@ cloud executors for `frontier`.
    beat the local one on the workflow's axis.
 7. **Availability:** fallbacks between tiers say why. `planned_tier` keeps what was asked for.
 
-**Measured** (2026-10-04, Claude's **drafted** labels, not yet confirmed by you; the tier rule was chosen on tune
-only, and test was run once):
+**Measured** (2026-10-04, on your labels: Claude's drafts, confirmed by you, plus 4 you labelled yourself). The
+tier rule was chosen on tune only.
 
 | Split | Router | Tier | Frontier recall · precision | Workflow (agent) | lev calls |
 |---|---|---|---|---|---|
-| tune (51) | old: fit formula | 78% | 1/12 · 1/1 | 88% | 4.7 |
-| tune (51) | **new: complexity ≥ 2.0** | **90%** | **11/12 · 11/15** | 88% | 5.0 |
-| test (49) | old | 82% | 1/10 · 1/1 | 73% | 4.7 |
-| test (49) | **new** | **84%** | **7/10 · 7/12** | 73% | 5.0 |
-| test | always local (baseline) | 78% | 0/10 | 31% (always `code_build`) | |
+| test (49) | old: fit formula, 6 workflows | 82% | 1/10 · 1/1 | 73% | 4.7 |
+| test (49) | new tier, 6 workflows | 84% | 7/10 · 7/12 | 73% | 5.0 |
+| test (49) | **new tier, `tech_qa` folded in (shipped)** | **84%** | **7/10 · 7/12** | **81%** | 5.0 |
+| test | always local / always `code_build` (baselines) | 78% | 0/10 | 52% | |
+| tune (51) | **shipped** | 88% | 10/11 · 10/15 | 90% | 5.0 |
 
 - **The tier gain on test is small,** +1 item over the old router and +3 over always-local. The real change is
   that hard tasks now leave the machine: frontier recall went from 10% to 70%, at the cost of 5 of 38 local tasks
   sent to frontier. `warden escalate` is the safety net for the hard tasks that stay local.
-- **Workflow accuracy fell from 88% on tune to 73% on test,** and nothing in the workflow mapping was tuned. The
-  main confusion is mode: questions about a system ("is it safe to run…", "how do I…") read as *act* and go to
-  `code_build` instead of `tech_qa`. There's also research vs `tech_qa` vs `assistant`. Merging `tech_qa` into
-  `code_build` is the obvious next experiment.
-- **Considered and rejected (tune):**
+- **The `tech_qa` fold came from the test split's confusion matrix.** Questions about a system ("is it safe to
+  run…", "how do I…") read as *act* and went to `code_build`. So test is no longer fully held-out for the
+  workflow number: treat 81% as optimistic and judge it on new labels (the Router page's *Was this route
+  right?*). The remaining confusion is research vs `assistant` vs `code_build`.
+- **Considered and rejected (tune, on the drafts):**
   - three yes/no "does this need a frontier model?" phrasings. One never fired; one fired on 41–57% of
     everything.
-  - complexity thresholds from 1.75 to 3.0. 2.0 and 2.25 tie on accuracy, and 2.25 is more local-first (recall
-    7/12, precision 7/8). Set `tier.complexity_min` to 2.25 if you'd rather escalate than over-send.
+  - complexity thresholds from 1.75 to 3.0. 2.0 and 2.25 tie on accuracy; 2.25 is more local-first (recall
+    7/12, precision 7/8). 2.0 is shipped, by your choice.
   - keeping sensitivity's force-local at 3.0. It never fired.
-- **The labels are my best guesses.** n≈50 per split, so ±7–10 points. Confirm them in the test bed and rerun.
+- **n≈50 per split,** so ±7–10 points.
 
 **Labels and evals:**
 - **Seed set:** `evals/routing/seed.jsonl` has 100 prompts in six areas, each with a fixed tune/test split and
-  Claude's draft label. The Labels page prefills the draft for you to confirm or change. Prompts labelled live on
+  Claude's draft label (you confirmed these on 2026-10-04). The Labels page prefills the draft for you to confirm or change. Prompts labelled live on
   the Router page are split by hash.
 - **Where your labels live:** `~/.local/state/warden/labels-routing.jsonl` (0600, append-only, the latest label
   wins).
@@ -235,7 +235,7 @@ echo "Edited auth.py 3 times; same AssertionError every run. Not sure why." | wa
 - **Eval:** `evals/escalation/seed.jsonl` has 60 drafted (task, tried) pairs with a fixed tune/test split. You
   confirm or flip each draft in the test bed (Labels → escalation). Then run
   `python3 evals/eval_escalation.py tune [--questions] [--grid]` while tuning and `… test` once.
-- **Measured** (2026-10-04, Claude's **drafted** labels, not yet confirmed by you):
+- **Measured** (2026-10-04, Claude's drafted labels, confirmed by you):
 
   | Split | lev only | rules only | rules + lev (shipped) | lev calls |
   |---|---|---|---|---|

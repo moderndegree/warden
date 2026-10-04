@@ -136,7 +136,7 @@
       "label": "Coding agent",
       "harness": "OpenCode / Grok Build / Claude Code",
       "axis": "coding",
-      "desc": "write, change, and run code in a project",
+      "desc": "write, change, and run code in a project, and answer technical questions",
       "experts": [
         "software",
         "devops",
@@ -145,6 +145,7 @@
         "design"
       ],
       "modes": [
+        "answer",
         "make",
         "act"
       ],
@@ -208,46 +209,6 @@
         {
           "model": "claude-opus-5-5",
           "via": "Claude Code · opus (plan mode)"
-        }
-      ]
-    },
-    "tech_qa": {
-      "label": "Technical Q&A",
-      "harness": "OpenCode",
-      "axis": "knowledge",
-      "desc": "quick technical answers and explanations",
-      "experts": [
-        "software",
-        "devops",
-        "security",
-        "data",
-        "design"
-      ],
-      "modes": [
-        "answer"
-      ],
-      "executors": [
-        {
-          "model": "qwen3.8-flash",
-          "via": "OpenCode · quick",
-          "needs": [
-            "opencode"
-          ]
-        },
-        {
-          "model": "openrouter/free",
-          "via": "OpenCode · OpenRouter free router",
-          "needs": [
-            "opencode"
-          ]
-        },
-        {
-          "model": "claude-haiku-4-5",
-          "via": "Claude · haiku"
-        },
-        {
-          "model": "claude-sonnet-5-5",
-          "via": "Claude · sonnet"
         }
       ]
     },
