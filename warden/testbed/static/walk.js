@@ -14,9 +14,9 @@ const STAGES = [
   ["expert", "routing", "Expert", "lev · choice"],
   ["mode", "routing", "Mode", "lev · choice"],
   ["agent", "routing", "Agent", "first agent whose experts and modes both match"],
-  ["complexity", "routing", "Complexity", "lev · score · skipped for one-model agents"],
-  ["executors", "routing", "Executors", "fit = capability vs need − cost − overkill ± constraints"],
-  ["sensitivity", "routing", "Data sensitivity", "lev · score · only if the pick would leave this machine"],
+  ["complexity", "routing", "Complexity → tier", "lev · score · frontier above the threshold · skipped for local-only workflows or secrets"],
+  ["sensitivity", "routing", "Data sensitivity", "lev · score · only before anything would leave this machine"],
+  ["executors", "routing", "Executors", "fit picks the model within the tier, among what is available"],
   ["decision", "routing", "Decision", ""],
 ];
 const GATES = { rules: "Gate 0 · Rules", security: "Gate 1 · Security", routing: "Gate 2 · Routing" };
@@ -327,13 +327,21 @@ function apply(ev) {
       if (rt.decision !== "blocked" && rt.decision !== "unavailable") activate("decision");
       if (rt.model && ui.rows[rt.model]) ui.rows[rt.model].tr.className = "win";
       const head = rt.decision === "blocked" ? "BLOCKED — not sent to any model"
-        : rt.model ? `→ ${rt.route.toUpperCase()} · ${rt.agent_label} · ${rt.model_label}` : rt.decision.toUpperCase();
+        : rt.model ? `→ ${(rt.tier || rt.route).toUpperCase()} · ${rt.agent_label} · ${rt.model_label}` : rt.decision.toUpperCase();
       ui.decision.className = "decision " + (rt.route || rt.decision.split(" ")[0]);
       ui.decision.replaceChildren(head, rt.via ? el("div", { class: "via" }, `run via: ${rt.via}`) : "",
         el("ul", {}, ...(rt.reasons || []).map((x) => el("li", {}, x))));
       if (rt.decision === "blocked") { ui.stages.decision.box.className = "stage done"; }
       else done("decision");
       trace(ev.t, `route → ${rt.model ? rt.route + " · " + rt.model : rt.decision}`, rt.decision === "blocked" ? "bad" : "ok");
+      break;
+    }
+    case "tier":
+      trace(ev.t, `tier → ${ev.tier}${ev.reasons.length ? " · " + ev.reasons.join(" ") : ""}`, ev.tier === "frontier" ? "warn" : "ok");
+      break;
+    case "availability": {
+      const down = Object.values(ev.status).filter((x) => !x.up);
+      trace(ev.t, down.length ? `unavailable: ${down.map((x) => `${x.label} (${x.why})`).join(", ")}` : "all executors' services available", down.length ? "warn" : "");
       break;
     }
     case "error":
@@ -347,11 +355,56 @@ function apply(ev) {
       const cost = r.cached ? "cached, 0 lev calls" : `${t.lev_calls} lev call${t.lev_calls === 1 ? "" : "s"}, ${t.lev_input_tokens.toLocaleString()} tokens, ${t.total_ms} ms`;
       setNow(`Done · ${r.security.status.toUpperCase()} · ${r.agent ? r.agent.label + " → " + (r.routing.model_label || r.routing.decision) : "stopped at " + r.stopped_at} · ${cost}`, false);
       trace(ev.t, `done · ${cost}`, "st");
+      routeFeedback(r);
       break;
     }
   }
   if (ev.t != null) $("clock").textContent = `t = +${Math.round(ev.t)} ms`;
 }
+
+// ---------------------------------------------------------------- routing feedback (becomes a routing label)
+
+const fb = { text: "", pred: null, label: {} };
+
+function tierOf(r) {
+  const d = r.routing?.decision;
+  return d === "blocked" ? "blocked" : r.routing?.route === "local" ? "local" : r.routing?.route ? "frontier" : null;
+}
+
+function fbButtons() {
+  const mk = (group, id, text, on) => {
+    const b = el("button", { type: "button", class: "fb", "aria-pressed": String(on) }, text);
+    b.addEventListener("click", () => {
+      fb.label[group] = id;
+      if (group === "tier" && id === "blocked") fb.label.workflow = null;
+      fbButtons();
+    });
+    return b;
+  };
+  $("rfb-tier").replaceChildren(el("span", { class: "meta-l" }, "Tier:"),
+    ...["local", "frontier", "blocked"].map((t) => mk("tier", t, t, fb.label.tier === t)));
+  const wfs = Object.entries(M.agents).map(([id, a]) => mk("workflow", id, a.label, fb.label.workflow === id));
+  wfs.forEach((b) => { b.disabled = fb.label.tier === "blocked"; });
+  $("rfb-wf").replaceChildren(el("span", { class: "meta-l" }, "Workflow:"), ...wfs);
+}
+
+function routeFeedback(r) {
+  fb.text = $("prompt").value;
+  fb.pred = { tier: tierOf(r), workflow: r.agent?.id ?? null };
+  fb.label = { ...fb.pred };
+  $("rfb").hidden = false;
+  $("rfb-msg").textContent = "Prefilled with the router's answer: change what's wrong, then save.";
+  $("rfb-note").value = "";
+  fbButtons();
+}
+
+$("rfb-save").addEventListener("click", async () => {
+  try {
+    const r = await postJSON("/api/labels", { kind: "routing", text: fb.text, label: fb.label, pred: fb.pred, note: $("rfb-note").value });
+    const same = r.label.tier === fb.pred.tier && r.label.workflow === fb.pred.workflow;
+    $("rfb-msg").textContent = `Saved ${r.id}: ${r.label.tier}${r.label.workflow ? " · " + r.label.workflow : ""}${same ? " (router was right)" : " (router was wrong)"}.`;
+  } catch (e) { $("rfb-msg").textContent = `Not saved: ${e.message}`; }
+});
 
 // ---------------------------------------------------------------- streaming + pacing
 
@@ -366,6 +419,7 @@ async function walk() {
   $("err").hidden = true;
   buildBoard();
   active = null;
+  $("rfb").hidden = true;
   setNow("Connecting…");
 
   const queue = [];

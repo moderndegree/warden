@@ -1,44 +1,34 @@
 """EXPERIMENTAL: pick an agent and model for a prompt, after the guard has passed it.
 
 Gates 0-1 are the guard's prompt boundary (warden.guard). Gate 2 asks lev only what can change the answer:
-expert + mode -> agent; complexity -> model within the agent (skipped for one-model agents); sensitivity
-only when the pick would leave this machine. Classifies only; never runs, answers, or forwards the prompt.
+expert + mode -> workflow (agent); complexity -> tier (local / frontier; skipped when the workflow is local-only
+or the rules found secrets/PII); sensitivity only before something would leave this machine. The executor fit
+then picks a model within the tier among what is available. The result's routing carries the convention:
+{"tier": local | frontier | blocked, "workflow": <agent id>} plus the chosen executor.
+Classifies only; never runs, answers, or forwards the prompt.
 """
 import hashlib
 import threading
 import time
 from collections import OrderedDict
 
-from . import config, rules
+from . import availability, config
+from .classify import choice_result as _choice, level_result as _level, state as classify_state
 from .guard import guard_events
-from .lev import Lev, DecisionError, frame
-from .router_logic import (agent_axis, choose_agent, decide_route, routing_questions, score_executors,
-                           score_question)
+from .lev import Lev, DecisionError
+from .router_logic import (agent_axis, choose_agent, choose_tier, decide_route, routing_questions, rules_local,
+                           score_executors, score_question)
 
 _cache, _cache_lock = OrderedDict(), threading.Lock()
 
 
-def _level(m, key, a):
-    lv = m[key]["levels"]
-    i = min(len(lv) - 1, round(a["score"]))
-    return {"label": m[key]["label"], "score": a["score"], "level": i, "level_text": lv[i],
-            "probabilities": a["probabilities"], "max": len(lv) - 1}
-
-
-def _choice(src, a):
-    top = sorted(a["probabilities"].items(), key=lambda kv: -kv[1])[:4]
-    return {"id": a["choice"], "label": src[a["choice"]]["label"], "p": a["probabilities"][a["choice"]],
-            "probabilities": a["probabilities"],
-            "alternatives": [{"id": k, "label": src[k]["label"], "p": p} for k, p in top]}
-
-
-def _walk(text, m, gcfg, lev):
+def _walk(text, m, gcfg, lev, status=None):
     t0 = time.monotonic()
     now = lambda: round((time.monotonic() - t0) * 1000, 1)
     res = {"chars": len(text), "est_prompt_tokens": int(len(text) / gcfg["chars_per_token"]), "hidden_text": None,
            "cached": False, "gates": [], "stopped_at": None, "security": None,
            "profile": {"expert": None, "mode": None, "complexity": None, "sensitivity": None, "skipped": {}},
-           "agent": None, "routing": None, "timings": None, "error": None}
+           "agent": None, "routing": None, "availability": None, "timings": None, "error": None}
     st = {"calls": 0, "lev_ms": 0, "tokens": 0}
 
     def finish():
@@ -67,8 +57,9 @@ def _walk(text, m, gcfg, lev):
         why = (f"Security verdict {sec['status'].upper()}: not sent to any model, routing skipped." if not g["degraded"]
                else "Decision model unavailable; only the rules gate ran.")
         yield {"type": "gate_skipped", "gate": "routing", "reason": f"stopped at {res['stopped_at']}" if not g["degraded"] else "lev unavailable", "t": now()}
-        res["routing"] = {"decision": "blocked" if not g["degraded"] else "unavailable", "agent": None, "model": None,
-                          "route": None, "table": [], "reasons": [why]}
+        res["routing"] = {"decision": "blocked" if not g["degraded"] else "unavailable",
+                          "tier": "blocked" if not g["degraded"] else None, "workflow": None, "agent": None,
+                          "model": None, "route": None, "table": [], "reasons": [why]}
         yield {"type": "route", "routing": res["routing"], "t": now()}
         yield finish()
         return
@@ -76,8 +67,9 @@ def _walk(text, m, gcfg, lev):
     # ---- Gate 2: routing --------------------------------------------------------------------
     t_open, calls0 = now(), st["calls"]
     yield {"type": "gate", "gate": "routing", "t": now()}
-    view = rules.redact(rules.normalize(text))["text"]
-    state = frame(view, m["route_state_chars"], "prompt")
+    status = res["availability"] = status if status is not None else availability.check(m)
+    yield {"type": "availability", "status": status, "t": now()}
+    state = classify_state(text, m)
     prof = res["profile"]
 
     def ask(qs):
@@ -102,10 +94,13 @@ def _walk(text, m, gcfg, lev):
                         "executors": len(ag["executors"])}
         yield {"type": "agent", **res["agent"], "t": now()}
 
-        asked, complexity = set(), None
-        if len(ag["executors"]) == 1:
-            prof["skipped"]["complexity"] = "agent has one executor"
-            yield {"type": "skip", "key": "complexity", "reason": prof["skipped"]["complexity"], "t": now()}
+        asked, complexity, sensitivity, tier, tier_why = set(), None, None, "local", []
+        keep_local = rules_local(sec)
+        if not any(m["models"][e["model"]]["route"] != "local" for e in ag["executors"]):
+            prof["skipped"]["complexity"] = "workflow has no frontier executor"
+        elif keep_local:
+            prof["skipped"]["complexity"] = "must stay local: " + ", ".join(keep_local)
+            tier_why = ["Keep local: " + ", ".join(keep_local) + "."]
         else:
             yield {"type": "ask", "key": "complexity", "t": now()}
             a, ms = ask(score_question(m, "complexity"))
@@ -113,24 +108,36 @@ def _walk(text, m, gcfg, lev):
             complexity = a["complexity"]["score"]
             asked.add("complexity")
             yield {"type": "answer", "key": "complexity", "answer": a["complexity"], "ms": ms, "t": now()}
+            tier, tier_why = choose_tier(m, complexity)
+        if "complexity" in prof["skipped"]:
+            yield {"type": "skip", "key": "complexity", "reason": prof["skipped"]["complexity"], "t": now()}
 
-        rows, ranked, force_local = score_executors(m, agent_id, axis, complexity, sec)
-        yield {"type": "executors", "rows": rows, "phase": "fit", "t": now()}
-
-        if ranked[0]["route"] == "local":
-            prof["skipped"]["sensitivity"] = ("already local (rules found secrets/PII)" if force_local
-                                              else "best pick is local; nothing leaves this machine")
-            yield {"type": "skip", "key": "sensitivity", "reason": prof["skipped"]["sensitivity"], "t": now()}
-        else:
+        def ask_sensitivity():
             yield {"type": "ask", "key": "sensitivity", "t": now()}
             a, ms = ask(score_question(m, "sensitivity"))
             prof["sensitivity"] = _level(m, "sensitivity", a["sensitivity"])
             asked.add("sensitivity")
             yield {"type": "answer", "key": "sensitivity", "answer": a["sensitivity"], "ms": ms, "t": now()}
-            rows, ranked, force_local = score_executors(m, agent_id, axis, complexity, sec, a["sensitivity"]["score"])
-            yield {"type": "executors", "rows": rows, "phase": "privacy", "t": now()}
 
-        res["routing"] = {**decide_route(m, agent_id, ranked, force_local, sec, asked), "table": rows}
+        if tier == "frontier":                       # ask only before something would leave this machine
+            yield from ask_sensitivity()
+            sensitivity = prof["sensitivity"]["score"]
+            tier, tier_why = choose_tier(m, complexity, sensitivity)
+        yield {"type": "tier", "tier": tier, "reasons": tier_why, "t": now()}
+
+        rows, ranked, force_local = score_executors(m, agent_id, axis, complexity, sec, sensitivity, status, tier)
+        if ranked[0]["eligible"] and ranked[0]["route"] != "local" and sensitivity is None:
+            # Local tier, but nothing local is available: check sensitivity before falling back to the cloud.
+            yield from ask_sensitivity()
+            sensitivity = prof["sensitivity"]["score"]
+            rows, ranked, force_local = score_executors(m, agent_id, axis, complexity, sec, sensitivity, status, tier)
+        if "sensitivity" not in asked:
+            prof["skipped"]["sensitivity"] = ("must stay local (rules found secrets/PII)" if keep_local
+                                              else "tier is local; nothing leaves this machine")
+            yield {"type": "skip", "key": "sensitivity", "reason": prof["skipped"]["sensitivity"], "t": now()}
+        yield {"type": "executors", "rows": rows, "phase": "fit", "t": now()}
+
+        res["routing"] = {**decide_route(m, agent_id, ranked, force_local, sec, asked, tier, tier_why), "table": rows}
         yield {"type": "route", "routing": res["routing"], "t": now()}
     except DecisionError as e:
         res["error"] = str(e)
@@ -145,16 +152,18 @@ def _walk(text, m, gcfg, lev):
     yield finish()
 
 
-def route_events(text, m=None, gcfg=None, lev=None):
-    """Yield walk events. Repeats (same text + same configs) replay from cache with zero model calls."""
+def route_events(text, m=None, gcfg=None, lev=None, status=None):
+    """Yield walk events. Repeats (same text + same configs + same availability) replay from cache with zero
+    model calls. status: an availability.check() result; None = check now."""
     explicit = any(x is not None for x in (m, gcfg, lev))
     m = m or config.load("router.json")
     gcfg = gcfg or config.load("guard.json")
     lev = lev or Lev(gcfg["decision_model"])
+    status = status if status is not None else availability.check(m)
     key = None
     if not explicit:
         key = (hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest(), config.mtime("router.json"),
-               config.mtime("guard.json"))
+               config.mtime("guard.json"), tuple(sorted((k, v["up"]) for k, v in status.items())))
         with _cache_lock:
             hit = _cache.get(key)
             if hit:
@@ -169,7 +178,7 @@ def route_events(text, m=None, gcfg=None, lev=None):
                     yield ev
             return
     events = []
-    for ev in _walk(text, m, gcfg, lev):
+    for ev in _walk(text, m, gcfg, lev, status):
         events.append(ev)
         # Store before yielding the final event: callers like route() stop reading at "result".
         if ev["type"] == "result" and key and not ev["result"]["error"]:
@@ -180,7 +189,7 @@ def route_events(text, m=None, gcfg=None, lev=None):
         yield ev
 
 
-def route(text, m=None, gcfg=None, lev=None):
-    for ev in route_events(text, m, gcfg, lev):
+def route(text, m=None, gcfg=None, lev=None, status=None):
+    for ev in route_events(text, m, gcfg, lev, status):
         if ev["type"] == "result":
             return ev["result"]

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Warden Labels</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="walk.css">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<script src="common.js" defer></script>
+<script src="labels.js" defer></script>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <h1 id="title">Label</h1>
+    <p class="sub" id="sub"></p>
+  </div>
+  <div class="top-right">
+    <nav class="nav" data-page="labels"></nav>
+    <div class="status" id="status"><span class="dot"></span><span id="status-text">checking lev…</span></div>
+  </div>
+</header>
+
+<main>
+  <section class="input">
+    <div class="row">
+      <div class="seg" role="radiogroup" aria-label="Label set" id="kinds"></div>
+      <label class="check"><input type="checkbox" id="only-open" checked> unlabelled only</label>
+      <span class="meta" id="progress"></span>
+    </div>
+    <p class="err" id="err" hidden></p>
+  </section>
+
+  <section id="item-box" hidden>
+    <article class="card wide">
+      <h2><span id="item-id"></span> <span class="tag" id="item-area"></span> <span class="hint" id="item-pos"></span></h2>
+      <div id="item"></div>
+    </article>
+    <article class="card wide" id="controls"></article>
+    <article class="card wide feedback">
+      <div class="row">
+        <label class="check"><input type="checkbox" id="unsure"> unsure <kbd>U</kbd></label>
+        <input type="text" id="note" placeholder="optional note" maxlength="500" aria-label="Note">
+        <button type="button" id="prev">Back <kbd>←</kbd></button>
+        <button type="button" id="skip">Skip <kbd>→</kbd></button>
+        <button type="button" id="save" class="primary">Save &amp; next <kbd>↵</kbd></button>
+      </div>
+      <p class="detail" id="saved-msg"></p>
+    </article>
+  </section>
+  <p class="empty" id="done" hidden>Everything in this set is labelled. Untick “unlabelled only” to review.</p>
+
+  <details class="card wide raw">
+    <summary>All items</summary>
+    <div class="scroll">
+      <table class="tbl" id="all"><thead><tr><th>id</th><th>Item</th><th>Label</th></tr></thead><tbody></tbody></table>
+    </div>
+  </details>
+</main>
+</body>
+</html>

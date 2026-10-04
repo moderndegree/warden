@@ -33,7 +33,7 @@ function nav() {
   const n = document.querySelector("nav.nav");
   if (!n) return;
   const page = n.dataset.page;
-  for (const [id, href, label] of [["guard", "/", "Guard"], ["decide", "/decide.html", "Decide"], ["router", "/walk.html", "Router (experimental)"]]) {
+  for (const [id, href, label] of [["guard", "/", "Guard"], ["classify", "/classify.html", "Classify"], ["decide", "/decide.html", "Decide"], ["router", "/walk.html", "Router (experimental)"], ["labels", "/labels.html", "Labels"]]) {
     const a = el("a", { href }, label);
     if (id === page) a.setAttribute("aria-current", "page");
     n.append(a);
@@ -47,6 +47,9 @@ async function health() {
     const r = await (await fetch("/api/health")).json();
     s.className = "status " + (r.decision_model_up ? "up" : "down");
     $("status-text").textContent = `warden ${r.warden} · ${r.decision_model} ${r.decision_model_up ? "online" : "offline (rules only)"}`;
+    const down = Object.values(r.availability || {}).filter((x) => !x.up);
+    if (down.length) $("status-text").textContent += ` · down: ${down.map((x) => x.label).join(", ")}`;
+    s.title = Object.values(r.availability || {}).map((x) => `${x.label}: ${x.why}`).join("\n");
   } catch {
     s.className = "status down";
     $("status-text").textContent = "server unreachable";

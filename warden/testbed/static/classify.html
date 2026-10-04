@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Warden Classify</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="walk.css">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<script src="common.js" defer></script>
+<script src="classify.js" defer></script>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <h1>Classify</h1>
+    <p class="sub">What expertise a prompt needs and what the user wants done, with the router's lev questions. Two lev calls; nothing runs or answers the prompt.</p>
+  </div>
+  <div class="top-right">
+    <nav class="nav" data-page="classify"></nav>
+    <div class="status" id="status"><span class="dot"></span><span id="status-text">checking lev…</span></div>
+  </div>
+</header>
+
+<main>
+  <section class="input">
+    <label for="text" class="label">Prompt</label>
+    <textarea id="text" class="short" spellcheck="false" placeholder="Paste or type a prompt…" autofocus></textarea>
+    <div class="row">
+      <button id="run" type="button" class="primary">Classify <kbd>Ctrl ↵</kbd></button>
+      <label class="check"><input type="checkbox" id="sens"> sensitivity (+1 call)</label>
+      <label class="check"><input type="checkbox" id="guard"> guard first (+2 calls)</label>
+      <span class="meta" id="count">0 chars</span>
+    </div>
+    <p class="cli" id="cli"></p>
+    <p class="err" id="err" hidden></p>
+  </section>
+
+  <section id="out" hidden>
+    <div class="verdict">
+      <div class="v-block"><span class="k">Expert</span><span class="v" id="expert"></span></div>
+      <div class="v-block"><span class="k">Mode</span><span class="v" id="mode"></span></div>
+      <div class="v-block"><span class="k">Workflow</span><span class="v" id="workflow"></span><span class="v small" id="why"></span></div>
+      <div class="v-block timing"><span class="k">Cost</span><span class="v small" id="cost"></span></div>
+    </div>
+    <div class="grid three">
+      <article class="card"><h2>Expert</h2><div id="expert-bars"></div></article>
+      <article class="card"><h2>Mode</h2><div id="mode-bars"></div></article>
+      <article class="card"><h2>Sensitivity &amp; guard</h2><div id="extra"></div></article>
+    </div>
+    <details class="card wide raw">
+      <summary>Raw JSON</summary>
+      <pre id="raw"></pre>
+    </details>
+  </section>
+</main>
+</body>
+</html>

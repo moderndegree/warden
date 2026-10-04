@@ -1,5 +1,5 @@
 {
-  "_comment": "EXPERIMENTAL router config (warden.router). Runs after the guard's prompt boundary (config/guard.json): expert + mode pick the agent, complexity picks the model within it; sensitivity is asked only if the pick would leave this machine.",
+  "_comment": "EXPERIMENTAL router config (warden.router). Runs after the guard's prompt boundary (config/guard.json): expert + mode pick the workflow (agents below); complexity picks the tier (local / frontier, see 'tier'); sensitivity is asked only for frontier; the executor fit then picks a model within the tier, among what is available.",
   "gates": {
     "_comment": "Verdicts that stop the walk at the gate where they appear.",
     "stop_on": [
@@ -102,7 +102,7 @@
       "confidential business or legal information",
       "secrets: passwords, API keys, credentials, financial account or ID numbers"
     ],
-    "force_local": 3.0,
+    "force_local": 2.0,
     "public_max": 1.5
   },
   "_agents_comment": "First agent whose experts AND modes match wins (dict order); otherwise fallback_agent. 'axis' overrides the expert's capability axis. Executors are the harness + model choices; the model is picked by fit within this list. 'via' is how you'd run it.",
@@ -125,7 +125,10 @@
       "executors": [
         {
           "model": "qwen3.8-flash",
-          "via": "Hermes · sully profile"
+          "via": "Hermes · sully profile",
+          "needs": [
+            "hermes"
+          ]
         }
       ]
     },
@@ -133,7 +136,7 @@
       "label": "Coding agent",
       "harness": "OpenCode / Grok Build / Claude Code",
       "axis": "coding",
-      "desc": "write, change, and run code in a project",
+      "desc": "write, change, and run code in a project, and answer technical questions",
       "experts": [
         "software",
         "devops",
@@ -142,13 +145,17 @@
         "design"
       ],
       "modes": [
+        "answer",
         "make",
         "act"
       ],
       "executors": [
         {
           "model": "qwen3.8-flash",
-          "via": "OpenCode · build"
+          "via": "OpenCode · build",
+          "needs": [
+            "opencode"
+          ]
         },
         {
           "model": "grok-4.7-build-fast",
@@ -186,7 +193,10 @@
       "executors": [
         {
           "model": "qwen3.8-flash",
-          "via": "OpenCode · plan"
+          "via": "OpenCode · plan",
+          "needs": [
+            "opencode"
+          ]
         },
         {
           "model": "grok-4.7",
@@ -199,40 +209,6 @@
         {
           "model": "claude-opus-5-5",
           "via": "Claude Code · opus (plan mode)"
-        }
-      ]
-    },
-    "tech_qa": {
-      "label": "Technical Q&A",
-      "harness": "OpenCode",
-      "axis": "knowledge",
-      "desc": "quick technical answers and explanations",
-      "experts": [
-        "software",
-        "devops",
-        "security",
-        "data",
-        "design"
-      ],
-      "modes": [
-        "answer"
-      ],
-      "executors": [
-        {
-          "model": "qwen3.8-flash",
-          "via": "OpenCode · quick"
-        },
-        {
-          "model": "openrouter/free",
-          "via": "OpenCode · OpenRouter free router"
-        },
-        {
-          "model": "claude-haiku-4-5",
-          "via": "Claude · haiku"
-        },
-        {
-          "model": "claude-sonnet-5-5",
-          "via": "Claude · sonnet"
         }
       ]
     },
@@ -258,7 +234,10 @@
       "executors": [
         {
           "model": "qwen3.8-flash",
-          "via": "Hermes · web tools"
+          "via": "Hermes · web tools",
+          "needs": [
+            "hermes"
+          ]
         },
         {
           "model": "grok-4.7",
@@ -289,11 +268,17 @@
       "executors": [
         {
           "model": "qwen3.8-flash",
-          "via": "Hermes"
+          "via": "Hermes",
+          "needs": [
+            "hermes"
+          ]
         },
         {
           "model": "openrouter/free",
-          "via": "Hermes · OpenRouter free router"
+          "via": "Hermes · OpenRouter free router",
+          "needs": [
+            "hermes"
+          ]
         },
         {
           "model": "claude-haiku-4-5",
@@ -329,7 +314,10 @@
       "context": 131072,
       "vision": true,
       "cost": 0,
-      "latency": 1
+      "latency": 1,
+      "needs": [
+        "halogen"
+      ]
     },
     "openrouter/free": {
       "label": "OpenRouter Free Router",
@@ -349,7 +337,10 @@
       "vision": false,
       "cost": 0,
       "latency": 2,
-      "note": "Picks a random free model per request: quality varies, rate-limited, prompts may be logged."
+      "note": "Picks a random free model per request: quality varies, rate-limited, prompts may be logged.",
+      "needs": [
+        "openrouter"
+      ]
     },
     "claude-haiku-4-5": {
       "label": "Claude Haiku 4.5",
@@ -368,7 +359,10 @@
       "context": 200000,
       "vision": true,
       "cost": 1,
-      "latency": 1
+      "latency": 1,
+      "needs": [
+        "claude"
+      ]
     },
     "grok-4.7-build-fast": {
       "label": "Grok 4.7 Build Fast (Grok Build)",
@@ -387,7 +381,10 @@
       "context": 256000,
       "vision": false,
       "cost": 1,
-      "latency": 1
+      "latency": 1,
+      "needs": [
+        "grok"
+      ]
     },
     "claude-sonnet-5-5": {
       "label": "Claude Sonnet 5.5",
@@ -406,7 +403,10 @@
       "context": 200000,
       "vision": true,
       "cost": 2,
-      "latency": 2
+      "latency": 2,
+      "needs": [
+        "claude"
+      ]
     },
     "grok-4.7": {
       "label": "Grok 4.7 (Grok Build)",
@@ -425,7 +425,10 @@
       "context": 256000,
       "vision": true,
       "cost": 2,
-      "latency": 2
+      "latency": 2,
+      "needs": [
+        "grok"
+      ]
     },
     "claude-opus-5-5": {
       "label": "Claude Opus 5.5",
@@ -444,7 +447,10 @@
       "context": 200000,
       "vision": true,
       "cost": 3,
-      "latency": 3
+      "latency": 3,
+      "needs": [
+        "claude"
+      ]
     }
   },
   "routing": {
@@ -455,5 +461,83 @@
     "overkill_penalty": 0.25,
     "local_bonus": 0.75,
     "chars_per_token": 3.5
+  },
+  "_availability_comment": "Local checks only (loopback /health, PATH, sign-in files; never a remote or paid API), cached ttl_s. A model's and executor's 'needs' name checks here; an executor whose needs are down is skipped and the route says why. Text that must stay local is held, never sent to the cloud, when no local executor is up.",
+  "availability": {
+    "ttl_s": 15,
+    "checks": {
+      "lev": {
+        "label": "lev (decision model)",
+        "kind": "http",
+        "url": "http://127.0.0.1:8200/health"
+      },
+      "halogen": {
+        "label": "Halogen (local model)",
+        "kind": "http",
+        "url": "http://127.0.0.1:8731/health"
+      },
+      "grok": {
+        "label": "Grok Build",
+        "kind": "auth",
+        "bin": "grok",
+        "file": "~/.grok/auth.json",
+        "field": "refresh_token"
+      },
+      "claude": {
+        "label": "Claude Code",
+        "kind": "auth",
+        "bin": "claude",
+        "file": "~/.claude/.credentials.json"
+      },
+      "opencode": {
+        "label": "OpenCode",
+        "kind": "bin",
+        "bin": "opencode"
+      },
+      "hermes": {
+        "label": "Hermes",
+        "kind": "bin",
+        "bin": "hermes"
+      },
+      "openrouter": {
+        "label": "OpenRouter (via OpenCode)",
+        "kind": "auth",
+        "file": "~/.local/share/opencode/auth.json",
+        "key": "openrouter"
+      }
+    }
+  },
+  "_escalation_comment": "warden escalate: one lev yes/no over the task + what the local agent tried. Rule signals in the summary: needs_person (a bigger model can't help) and done (without stuck) keep it local and skip lev. Regexes, case-insensitive.",
+  "escalation": {
+    "question": "Should this task be handed off to a more capable frontier AI model now, rather than letting the local agent keep trying?",
+    "threshold": 0.5,
+    "state_chars": 2400,
+    "signals": {
+      "stuck": [
+        "\\bsame (\\w+ )?\\w*(error|exception|failure|problem|feedback)\\b",
+        "\\bstill (fails?|failing|broken|wrong|grows|unchanged|there)\\b",
+        "\\b(not sure|unsure|no idea|out of ideas|lost track|not (confident|certain))\\b",
+        "\\b(can'?t|couldn'?t|could not|cannot) (find|see|figure|reproduce|tell)\\b",
+        "\\b(reverted|rolled back)\\b",
+        "\\bkeep (appearing|failing|coming)\\b"
+      ],
+      "done": [
+        "\\b(all )?(\\d+ )?tests? (now )?pass(es|ed)?\\b",
+        "\\b(confirmed|approved) (it|that)\\b",
+        "\\b(it )?works now\\b",
+        "\\blooks right\\b"
+      ],
+      "needs_person": [
+        "\\b(needs?|requires?) (sudo|root|the user)\\b",
+        "\\bnot (allowed|permitted) to\\b",
+        "\\bpermission denied\\b",
+        "\\bnetwork (is )?(unreachable|down)\\b|\\bno internet\\b",
+        "\\bwaiting (on|for) the user\\b"
+      ]
+    }
+  },
+  "tier": {
+    "_comment": "Coarse tier, measured on routing labels (evals/routing_policies.py): frontier when lev's complexity score >= complexity_min, unless secrets/PII (rules) or sensitivity >= sensitivity.force_local keep it local. Within the tier, the executor fit below only picks the model; a frontier executor must beat the local one on the agent's axis.",
+    "complexity_min": 2.0
   }
 }

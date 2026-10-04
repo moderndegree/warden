@@ -4,8 +4,10 @@ A local guard and decision engine for AI agents, built on the small local decisi
 (`/v1/systemone` on `127.0.0.1:8200`). Standard library only, Python ≥ 3.11.
 
 - **Guard**: inspects text at a boundary and says what to do with it.
+- **Classify**: what expertise a prompt needs and what the user wants done (2 lev calls).
+- **Escalate**: should a local agent hand a task to a frontier model now? (one lev call, or none)
 - **Decide**: offloads bulk yes/no, choice, and score decisions from big models to lev.
-- **Router** (experimental): picks an agent and model for a prompt.
+- **Router** (experimental): picks a workflow and a tier (local / frontier / blocked), then a model, for a prompt.
 - **Test bed**: a local UI for all of the above.
 
 > **Status: test bed only, not integrated into anything yet.** The skill in `skill/warden/` is written but not
@@ -139,6 +141,133 @@ warden decide --brief -k choice -q "What kind of issue is this?" -o "bug=a defec
 - Good for triage, filtering and relevance checks. Not for final high-stakes calls: lev scores about 80% on
   JevBench and calls a shoe-sale email an "action item".
 
+## Classify
+
+```bash
+echo "fix the failing test in auth.py" | warden classify --brief
+# software/act → code_build  p=0.96/0.47
+```
+
+- **Expert** (10 kinds of expertise) and **mode** (answer / make / act / plan / lookup): the router's own lev
+  questions, one call each. Asking both in one request costs the same (measured: 500 ms vs 504 ms), so they stay
+  separate.
+- `--sensitivity` adds a 0–4 privacy score (+1 call); `--guard` runs the prompt guard first and stops on block.
+- The **workflow** is the router's mapping of expert + mode; it costs no extra call.
+
+## Routing
+
+```bash
+warden route "Plan a zero-downtime move from Docker Compose to Podman quadlets" | jq .routing
+# {"tier": "frontier", "workflow": "code_plan", "via": "Grok Build -m grok-4.7 (plan)", "reasons": [...], ...}
+```
+
+**The convention is workflow × tier.** warden answers with that pair and consumers map it to a concrete harness.
+The default `router.json` maps it to this machine's harnesses: each agent's local executor for `local`, and its
+cloud executors for `frontier`.
+- **Workflow:** one of `router.json`'s agents: `voice_home`, `code_build`, `code_plan`, `research` or
+  `assistant`. Quick technical answers (`tech_qa`) were folded into `code_build` on 2026-10-04.
+- **Tier:** `local`, `frontier` or `blocked`.
+
+**How the decision is made:**
+1. **Guard:** a block means `blocked`.
+2. **Expert + mode** pick the workflow.
+3. **Rules** that find secrets or high-risk PII keep it local, and complexity isn't asked.
+4. **lev's complexity score:** ≥ `tier.complexity_min` (2.0) means `frontier`.
+5. **Sensitivity** is asked only before anything would leave the machine. At ≥ 2.0 ("private personal
+   information") it keeps the request local.
+6. **Executor fit:** the old fit formula now only picks the model **within** the tier. A frontier executor must
+   beat the local one on the workflow's axis.
+7. **Availability:** fallbacks between tiers say why. `planned_tier` keeps what was asked for.
+
+**Measured** (2026-10-04, on your labels: Claude's drafts, confirmed by you, plus 4 you labelled yourself). The
+tier rule was chosen on tune only.
+
+| Split | Router | Tier | Frontier recall · precision | Workflow (agent) | lev calls |
+|---|---|---|---|---|---|
+| test (49) | old: fit formula, 6 workflows | 82% | 1/10 · 1/1 | 73% | 4.7 |
+| test (49) | new tier, 6 workflows | 84% | 7/10 · 7/12 | 73% | 5.0 |
+| test (49) | **new tier, `tech_qa` folded in (shipped)** | **84%** | **7/10 · 7/12** | **81%** | 5.0 |
+| test | always local / always `code_build` (baselines) | 78% | 0/10 | 52% | |
+| tune (51) | **shipped** | 88% | 10/11 · 10/15 | 90% | 5.0 |
+
+- **The tier gain on test is small,** +1 item over the old router and +3 over always-local. The real change is
+  that hard tasks now leave the machine: frontier recall went from 10% to 70%, at the cost of 5 of 38 local tasks
+  sent to frontier. `warden escalate` is the safety net for the hard tasks that stay local.
+- **The `tech_qa` fold came from the test split's confusion matrix.** Questions about a system ("is it safe to
+  run…", "how do I…") read as *act* and went to `code_build`. So test is no longer fully held-out for the
+  workflow number: treat 81% as optimistic and judge it on new labels (the Router page's *Was this route
+  right?*). The remaining confusion is research vs `assistant` vs `code_build`.
+- **Considered and rejected (tune, on the drafts):**
+  - three yes/no "does this need a frontier model?" phrasings. One never fired; one fired on 41–57% of
+    everything.
+  - complexity thresholds from 1.75 to 3.0. 2.0 and 2.25 tie on accuracy; 2.25 is more local-first (recall
+    7/12, precision 7/8). 2.0 is shipped, by your choice.
+  - keeping sensitivity's force-local at 3.0. It never fired.
+- **n≈50 per split,** so ±7–10 points.
+
+**Labels and evals:**
+- **Seed set:** `evals/routing/seed.jsonl` has 100 prompts in six areas, each with a fixed tune/test split and
+  Claude's draft label (you confirmed these on 2026-10-04). The Labels page prefills the draft for you to confirm or change. Prompts labelled live on
+  the Router page are split by hash.
+- **Where your labels live:** `~/.local/state/warden/labels-routing.jsonl` (0600, append-only, the latest label
+  wins).
+- **Scripts:**
+  - `evals/eval_routing.py tune|test [--drafts]`: end to end;
+  - `evals/routing_policies.py tune|test [--drafts]`: offline policy comparison.
+
+  Both use the lev cache in `evals/cache.sqlite`.
+
+## Escalate
+
+```bash
+echo "Edited auth.py 3 times; same AssertionError every run. Not sure why." | warden escalate --brief -t "Fix the failing test"
+# escalate p=0.85 · lev: hand off (p=0.85 ≥ 0.5)
+```
+
+- **One lev yes/no** over the task and the agent's summary of what it tried. Both are redacted and framed as data.
+- **Rule signals** in the summary come first:
+  - **needs a person** (sudo or permissions, no network, waiting on the user) means stay local: a bigger model
+    can't help, so the reason says to ask the user.
+  - **clear success** without signs of being stuck means stay local.
+
+  When either applies, lev isn't asked at all.
+- **If lev is down,** the answer is *stay local* with `error` set, and the exit code is 1.
+- **Eval:** `evals/escalation/seed.jsonl` has 60 drafted (task, tried) pairs with a fixed tune/test split. You
+  confirm or flip each draft in the test bed (Labels → escalation). Then run
+  `python3 evals/eval_escalation.py tune [--questions] [--grid]` while tuning and `… test` once.
+- **Measured** (2026-10-04, Claude's drafted labels, confirmed by you):
+
+  | Split | lev only | rules only | rules + lev (shipped) | lev calls |
+  |---|---|---|---|---|
+  | tune (30) | 29/30 | 24/30 | 30/30 | 0.83 |
+  | test (30, once) | 29/30 | 24/30 | **30/30** | 0.87 |
+
+  The configured question beat three alternative phrasings on tune (28–29/30), and the threshold barely matters
+  (bimodal scores). **This is optimistic:** the same author (Claude) wrote the examples, the drafts and the rule
+  patterns, and the summaries are cleaner than real ones. A dozen summaries from real stuck local sessions would
+  be the honest test.
+
+## Availability
+
+A route never points at something that can't run right now. Every check is local:
+
+| Check | How |
+|---|---|
+| lev (:8200), Halogen (:8731) | Loopback `/health`. Non-loopback URLs are refused. |
+| Grok Build | `grok` on PATH, and `~/.grok/auth.json` has a sign-in with a refresh token |
+| Claude Code | `claude` on PATH, and `~/.claude/.credentials.json` exists (it isn't parsed) |
+| OpenCode, Hermes | On PATH |
+| OpenRouter | `opencode`'s auth file has an `openrouter` entry |
+
+- **No remote calls:** nothing calls a remote or paid API, and no credential value is ever read into output. As
+  a result, a revoked token still looks signed in.
+- **Caching:** results are cached for 15 s and are part of the router's cache key.
+- **Fallback:** a route to something that's down falls back to the next executor, and the reasons say what it fell
+  back from and why.
+- **Held:** text that must stay local (secrets, high-risk PII, high sensitivity) is **held** when the local model is
+  down. It's never sent to a cloud model instead.
+- **Config:** `router.json` → `availability`. Models and executors name what they depend on in `needs`.
+
 ## CLI
 
 | Command | What it does | Exit codes |
@@ -146,9 +275,11 @@ warden decide --brief -k choice -q "What kind of issue is this?" -o "bug=a defec
 | `warden scan [-b prompt\|content\|outbound] [--no-lev] [--brief]` | Run the guard (input from stdin, `-f FILE`, or args) | 0 allow · 3 review · 4 block · 1 error |
 | `warden redact` | Print redacted text; counts go to stderr | 0 nothing removed · 3 redacted |
 | `warden decide -q Q [-k kind] [-o id=desc …] [-l level …] [-c context] [--brief]` | One question per item (stdin lines, args, or `-f`) | |
+| `warden classify [--sensitivity] [--guard] [--brief]` | Expert + mode (+ sensitivity) and the workflow they map to | 0 ok · 4 stopped by `--guard` · 1 lev down |
+| `warden escalate -t TASK [TRIED \| -f FILE \| stdin] [--brief]` | Hand off to a frontier model? | 0 stay local · 3 escalate · 1 error |
 | `warden route` | Experimental router; prints JSON | |
 | `warden eval [--sets …] [--no-lev]` | Measure the guard | |
-| `warden health` | Check the config and lev | |
+| `warden health [--brief]` | Check the config, lev, and what routes can use | 0 lev up · 1 lev down |
 | `warden testbed` | Run the test bed UI | |
 
 **Why a CLI and a skill, not an MCP:**
@@ -166,8 +297,12 @@ warden decide --brief -k choice -q "What kind of issue is this?" -o "bug=a defec
 
 - **Guard**: boundary picker, verdict and action, gate cards, redacted output, findings, feedback buttons, and the
   equivalent CLI command.
+- **Classify**: expert and mode with probability bars, optional sensitivity and guard, plus the equivalent CLI.
 - **Decide**: question, kind, options or levels, items, then results with confidence bars, plus the equivalent CLI.
-- **Router (experimental)**: the live walk through the gates, agent and executors.
+- **Router (experimental)**: the live walk through the gates, agent and executors, then *Was this route right?*
+  (saved as a routing label).
+- **Labels**: build the routing and escalation eval sets, one item at a time with keyboard shortcuts. The model's
+  prediction is never shown there, so it can't anchor the label, and labelling makes no lev calls.
 
 Hardening:
 - Loopback-only, with a Host allowlist against DNS rebinding.
@@ -179,12 +314,12 @@ Hardening:
 ## Layout
 
 ```
-warden/          rules.py · lev.py · guard.py · decide.py · router.py (+ router_logic.py) · evaluate.py · feedback.py · cli.py
+warden/          rules.py · lev.py · guard.py · classify.py · escalate.py · availability.py · decide.py · labels.py · router.py (+ router_logic.py) · evaluate.py · feedback.py · cli.py
 warden/defaults/ guard.json · router.json
 warden/testbed/  server.py · static/
 skill/warden/    SKILL.md (not installed)
-evals/           samples.json (dev) · fetch.py · analyze.py (tuning workbench) · eval_router.py · data/, reports/, cache.sqlite (git-ignored)
-tests/           rules · guard · decide · router · cli · perf (ReDoS) · fuzz (stubbed lev)
+evals/           samples.json (dev) · fetch.py · analyze.py (tuning workbench) · eval_router.py · eval_routing.py · eval_escalation.py · routing/, escalation/ (seed.jsonl) · data/, reports/, cache.sqlite (git-ignored)
+tests/           rules · guard · classify · escalate · availability · decide · router · labels · cli · testbed · perf (ReDoS) · fuzz (stubbed lev)
 ```
 
 ## Known limits
@@ -196,4 +331,5 @@ tests/           rules · guard · decide · router · cli · perf (ReDoS) · fu
 - **Very long content is sampled:** more than 24 windows (about 12 KB). Rules still see every character.
 - **lev handles one request at a time** (`-np 1`) and is shared with Sully's voice routing. Content scanning makes
   several calls per page.
-- **The router's capability levels are estimates**, and it can't see attachments.
+- **Model choice within a tier uses estimated capability levels** and hasn't been measured. The router can't see
+  attachments.
