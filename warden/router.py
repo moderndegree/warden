@@ -9,27 +9,14 @@ import threading
 import time
 from collections import OrderedDict
 
-from . import config, rules
+from . import config
+from .classify import choice_result as _choice, level_result as _level, state as classify_state
 from .guard import guard_events
-from .lev import Lev, DecisionError, frame
+from .lev import Lev, DecisionError
 from .router_logic import (agent_axis, choose_agent, decide_route, routing_questions, score_executors,
                            score_question)
 
 _cache, _cache_lock = OrderedDict(), threading.Lock()
-
-
-def _level(m, key, a):
-    lv = m[key]["levels"]
-    i = min(len(lv) - 1, round(a["score"]))
-    return {"label": m[key]["label"], "score": a["score"], "level": i, "level_text": lv[i],
-            "probabilities": a["probabilities"], "max": len(lv) - 1}
-
-
-def _choice(src, a):
-    top = sorted(a["probabilities"].items(), key=lambda kv: -kv[1])[:4]
-    return {"id": a["choice"], "label": src[a["choice"]]["label"], "p": a["probabilities"][a["choice"]],
-            "probabilities": a["probabilities"],
-            "alternatives": [{"id": k, "label": src[k]["label"], "p": p} for k, p in top]}
 
 
 def _walk(text, m, gcfg, lev):
@@ -76,8 +63,7 @@ def _walk(text, m, gcfg, lev):
     # ---- Gate 2: routing --------------------------------------------------------------------
     t_open, calls0 = now(), st["calls"]
     yield {"type": "gate", "gate": "routing", "t": now()}
-    view = rules.redact(rules.normalize(text))["text"]
-    state = frame(view, m["route_state_chars"], "prompt")
+    state = classify_state(text, m)
     prof = res["profile"]
 
     def ask(qs):

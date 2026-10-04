@@ -33,7 +33,7 @@ function nav() {
   const n = document.querySelector("nav.nav");
   if (!n) return;
   const page = n.dataset.page;
-  for (const [id, href, label] of [["guard", "/", "Guard"], ["decide", "/decide.html", "Decide"], ["router", "/walk.html", "Router (experimental)"]]) {
+  for (const [id, href, label] of [["guard", "/", "Guard"], ["classify", "/classify.html", "Classify"], ["decide", "/decide.html", "Decide"], ["router", "/walk.html", "Router (experimental)"]]) {
     const a = el("a", { href }, label);
     if (id === page) a.setAttribute("aria-current", "page");
     n.append(a);

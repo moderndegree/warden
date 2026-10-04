@@ -4,6 +4,7 @@ A local guard and decision engine for AI agents, built on the small local decisi
 (`/v1/systemone` on `127.0.0.1:8200`). Standard library only, Python ≥ 3.11.
 
 - **Guard**: inspects text at a boundary and says what to do with it.
+- **Classify**: what expertise a prompt needs and what the user wants done (2 lev calls).
 - **Decide**: offloads bulk yes/no, choice, and score decisions from big models to lev.
 - **Router** (experimental): picks an agent and model for a prompt.
 - **Test bed**: a local UI for all of the above.
@@ -139,6 +140,19 @@ warden decide --brief -k choice -q "What kind of issue is this?" -o "bug=a defec
 - Good for triage, filtering and relevance checks. Not for final high-stakes calls: lev scores about 80% on
   JevBench and calls a shoe-sale email an "action item".
 
+## Classify
+
+```bash
+echo "fix the failing test in auth.py" | warden classify --brief
+# software/act → code_build  p=0.96/0.47
+```
+
+- **Expert** (10 kinds of expertise) and **mode** (answer / make / act / plan / lookup): the router's own lev
+  questions, one call each. Asking both in one request costs the same (measured: 500 ms vs 504 ms), so they stay
+  separate.
+- `--sensitivity` adds a 0–4 privacy score (+1 call); `--guard` runs the prompt guard first and stops on block.
+- The **workflow** is the router's mapping of expert + mode; it costs no extra call.
+
 ## CLI
 
 | Command | What it does | Exit codes |
@@ -146,6 +160,7 @@ warden decide --brief -k choice -q "What kind of issue is this?" -o "bug=a defec
 | `warden scan [-b prompt\|content\|outbound] [--no-lev] [--brief]` | Run the guard (input from stdin, `-f FILE`, or args) | 0 allow · 3 review · 4 block · 1 error |
 | `warden redact` | Print redacted text; counts go to stderr | 0 nothing removed · 3 redacted |
 | `warden decide -q Q [-k kind] [-o id=desc …] [-l level …] [-c context] [--brief]` | One question per item (stdin lines, args, or `-f`) | |
+| `warden classify [--sensitivity] [--guard] [--brief]` | Expert + mode (+ sensitivity) and the workflow they map to | 0 ok · 4 stopped by `--guard` · 1 lev down |
 | `warden route` | Experimental router; prints JSON | |
 | `warden eval [--sets …] [--no-lev]` | Measure the guard | |
 | `warden health` | Check the config and lev | |
@@ -166,6 +181,7 @@ warden decide --brief -k choice -q "What kind of issue is this?" -o "bug=a defec
 
 - **Guard**: boundary picker, verdict and action, gate cards, redacted output, findings, feedback buttons, and the
   equivalent CLI command.
+- **Classify**: expert and mode with probability bars, optional sensitivity and guard, plus the equivalent CLI.
 - **Decide**: question, kind, options or levels, items, then results with confidence bars, plus the equivalent CLI.
 - **Router (experimental)**: the live walk through the gates, agent and executors.
 
@@ -179,12 +195,12 @@ Hardening:
 ## Layout
 
 ```
-warden/          rules.py · lev.py · guard.py · decide.py · router.py (+ router_logic.py) · evaluate.py · feedback.py · cli.py
+warden/          rules.py · lev.py · guard.py · classify.py · decide.py · router.py (+ router_logic.py) · evaluate.py · feedback.py · cli.py
 warden/defaults/ guard.json · router.json
 warden/testbed/  server.py · static/
 skill/warden/    SKILL.md (not installed)
 evals/           samples.json (dev) · fetch.py · analyze.py (tuning workbench) · eval_router.py · data/, reports/, cache.sqlite (git-ignored)
-tests/           rules · guard · decide · router · cli · perf (ReDoS) · fuzz (stubbed lev)
+tests/           rules · guard · classify · decide · router · cli · testbed · perf (ReDoS) · fuzz (stubbed lev)
 ```
 
 ## Known limits

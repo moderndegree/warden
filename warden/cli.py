@@ -4,12 +4,14 @@
   warden redact   [TEXT | -f FILE | stdin] [--json]
   warden decide   -q QUESTION [-k yes_no|choice|score] [-o id=description ...] [-l level ...]
                   [-c CONTEXT] [ITEM ... | -f FILE (one item per line, or a JSON array)] [--brief]
+  warden classify [TEXT | -f FILE | stdin] [--sensitivity] [--guard] [--brief]
   warden route    [TEXT | -f FILE | stdin]            (experimental)
   warden eval     [--sets dev,feedback,gandalf,jailbreak,neuralchemy,pairs,safeguard,ipi,web] [--no-lev]
   warden health
   warden testbed  [--port 8740]
 
 Exit codes (scan): 0 allow · 3 review · 4 block · 1 error · 2 usage. (redact): 0 nothing removed · 3 redacted.
+(classify): 0 classified · 4 stopped by --guard · 1 lev unavailable.
 """
 import argparse
 import json
@@ -89,6 +91,13 @@ def cmd_decide(args):
     return 0 if r["complete"] else 1
 
 
+def cmd_classify(args):
+    from .classify import brief, classify
+    r = classify(_text(args), sensitivity=args.sensitivity, guard=args.guard)
+    print(brief(r)) if args.brief else _out(r)
+    return 4 if r["stopped"] else 1 if r["error"] else 0
+
+
 def cmd_route(args):
     from .router import route
     _out(route(_text(args)))
@@ -153,6 +162,13 @@ def main(argv=None):
     p.add_argument("-f", "--file", help="items file: one per line, or a JSON array")
     p.add_argument("--brief", action="store_true", help="index<TAB>answer<TAB>p per line")
     p.set_defaults(fn=cmd_decide)
+
+    p = sub.add_parser("classify", help="expert + mode (+ sensitivity) of a prompt; 2-3 lev calls")
+    text_args(p)
+    p.add_argument("--sensitivity", action="store_true", help="also score data sensitivity (+1 lev call)")
+    p.add_argument("--guard", action="store_true", help="run the prompt guard first; stop on block (+2 lev calls)")
+    p.add_argument("--brief", action="store_true", help="one-line summary instead of JSON")
+    p.set_defaults(fn=cmd_classify)
 
     p = sub.add_parser("route", help="(experimental) pick agent + model for a prompt")
     text_args(p)
