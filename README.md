@@ -153,6 +153,22 @@ echo "fix the failing test in auth.py" | warden classify --brief
 - `--sensitivity` adds a 0–4 privacy score (+1 call); `--guard` runs the prompt guard first and stops on block.
 - The **workflow** is the router's mapping of expert + mode; it costs no extra call.
 
+## Routing labels
+
+The routing convention is **workflow × tier**:
+- **Workflow** is one of `router.json`'s agents: `voice_home`, `code_build`, `code_plan`, `tech_qa`, `research`
+  or `assistant`.
+- **Tier** is `local`, `frontier` or `blocked`.
+
+warden answers with that pair, and consumers map it to a concrete harness. Labels use the same pair.
+
+- **Seed set:** `evals/routing/seed.jsonl` has 100 prompts in six areas: code, sysadmin, home, research, writing
+  and edge cases. Each has a fixed tune/test split. Prompts labelled live on the Router page are split by hash.
+- **Where labels live:** `~/.local/state/warden/labels-routing.jsonl` (0600, append-only, the latest label wins).
+- **Measure:** `python3 evals/eval_routing.py tune --misses 20` while tuning, `… test` once for the report. It
+  shows tier accuracy, agent accuracy, local-vs-frontier with frontier recall and precision, confusion matrices,
+  and majority baselines. lev answers are cached in `evals/cache.sqlite`.
+
 ## CLI
 
 | Command | What it does | Exit codes |
@@ -183,7 +199,10 @@ echo "fix the failing test in auth.py" | warden classify --brief
   equivalent CLI command.
 - **Classify**: expert and mode with probability bars, optional sensitivity and guard, plus the equivalent CLI.
 - **Decide**: question, kind, options or levels, items, then results with confidence bars, plus the equivalent CLI.
-- **Router (experimental)**: the live walk through the gates, agent and executors.
+- **Router (experimental)**: the live walk through the gates, agent and executors, then *Was this route right?*
+  (saved as a routing label).
+- **Labels**: build the routing and escalation eval sets, one item at a time with keyboard shortcuts. The model's
+  prediction is never shown there, so it can't anchor the label, and labelling makes no lev calls.
 
 Hardening:
 - Loopback-only, with a Host allowlist against DNS rebinding.
@@ -195,12 +214,12 @@ Hardening:
 ## Layout
 
 ```
-warden/          rules.py · lev.py · guard.py · classify.py · decide.py · router.py (+ router_logic.py) · evaluate.py · feedback.py · cli.py
+warden/          rules.py · lev.py · guard.py · classify.py · decide.py · labels.py · router.py (+ router_logic.py) · evaluate.py · feedback.py · cli.py
 warden/defaults/ guard.json · router.json
 warden/testbed/  server.py · static/
 skill/warden/    SKILL.md (not installed)
-evals/           samples.json (dev) · fetch.py · analyze.py (tuning workbench) · eval_router.py · data/, reports/, cache.sqlite (git-ignored)
-tests/           rules · guard · classify · decide · router · cli · testbed · perf (ReDoS) · fuzz (stubbed lev)
+evals/           samples.json (dev) · fetch.py · analyze.py (tuning workbench) · eval_router.py · eval_routing.py · routing/seed.jsonl · data/, reports/, cache.sqlite (git-ignored)
+tests/           rules · guard · classify · decide · router · labels · cli · testbed · perf (ReDoS) · fuzz (stubbed lev)
 ```
 
 ## Known limits

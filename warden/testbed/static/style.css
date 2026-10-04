@@ -150,3 +150,7 @@ td.conf { width: 220px; }
 td.conf .bar { grid-template-columns: 0 1fr 38px; margin: 0; }
 .gatecard.g-allow span:nth-child(2) { color: var(--ok); }
 @media (max-width: 640px) { .form-grid { grid-template-columns: minmax(0, 1fr); } .verdict.three-col { grid-template-columns: minmax(0, 1fr); } }
+button.fb[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button.fb:disabled { cursor: not-allowed; }
+#controls .row { flex-wrap: wrap; }
+#all tbody tr { cursor: pointer; }

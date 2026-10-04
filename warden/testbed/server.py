@@ -9,7 +9,7 @@ import mimetypes
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from .. import __version__, config, feedback
+from .. import __version__, config, feedback, labels
 from ..classify import classify
 from ..decide import decide
 from ..guard import BOUNDARIES, guard_events, inspect
@@ -108,6 +108,15 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {**config.load("router.json"), "security": {"label": "Security check", **g["thresholds"]}})
         if path == "/api/samples":     # dev samples live in the repo; an installed copy may not have them
             return self._send(200, json.loads(SAMPLES.read_text()) if SAMPLES.is_file() else [])
+        if path.startswith("/api/labels/"):
+            kind = path.rsplit("/", 1)[1]
+            if kind not in labels.KINDS:
+                return self._send(404, {"error": "not found"})
+            m = config.load("router.json")
+            return self._send(200, {"items": labels.seeds(kind), "labels": labels.latest(kind),
+                                    "path": str(labels.path(kind)), "tiers": labels.TIERS,
+                                    "workflows": [{"id": k, "label": a["label"], "desc": a["desc"]}
+                                                  for k, a in m["agents"].items()]})
         if path == "/api/feedback/stats":
             return self._send(200, feedback.stats())
         name = "index.html" if path == "/" else path.lstrip("/")
@@ -118,7 +127,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = self.path.split("?")[0]
-        routes = {"/api/guard", "/api/guard/stream", "/api/route/stream", "/api/classify", "/api/decide", "/api/feedback"}
+        routes = {"/api/guard", "/api/guard/stream", "/api/route/stream", "/api/classify", "/api/decide", "/api/feedback", "/api/labels"}
         if path not in routes:
             return self._send(404, {"error": "not found"})
         body = self._body()
@@ -150,6 +159,17 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, decide(str(body.get("question", "")), body.get("kind", "yes_no"), items,
                                               options=body.get("options") or None, levels=body.get("levels") or None,
                                               context=body.get("context") or None))
+            if path == "/api/labels":
+                kind, item_id = body.get("kind"), body.get("id")
+                seed = next((x for x in labels.seeds(kind) if x["id"] == item_id), None) if kind in labels.KINDS else None
+                text = seed["text"] if seed else body.get("text")
+                if seed is None:
+                    if not isinstance(text, str) or not text.strip():
+                        return self._send(400, {"error": "text is required"})
+                    item_id = labels.text_id(text)
+                rec = labels.append(kind, item_id, text, body.get("label"), "seed" if seed else "live",
+                                    body.get("pred"), str(body.get("note", "")))
+                return self._send(200, {"ok": True, "id": rec["id"], "label": rec["label"]})
             if path == "/api/feedback":
                 rec = feedback.append(body.get("boundary", "prompt"), str(body.get("text", "")), body.get("got"),
                                       body.get("expected"), body.get("score"), body.get("findings") or [],
