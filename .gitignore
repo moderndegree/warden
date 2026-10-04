@@ -1,0 +1,7 @@
+__pycache__/
+*.egg-info/
+build/
+dist/
+evals/data/
+evals/reports/
+evals/cache.sqlite

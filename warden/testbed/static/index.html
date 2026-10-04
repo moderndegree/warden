@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Warden Guard</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="walk.css">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<script src="common.js" defer></script>
+<script src="guard.js" defer></script>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <h1>Guard</h1>
+    <p class="sub">Inspect text at a boundary: rules first, then lev. Nothing is run, answered, or forwarded.</p>
+  </div>
+  <div class="top-right">
+    <nav class="nav" data-page="guard"></nav>
+    <div class="status" id="status"><span class="dot"></span><span id="status-text">checking lev…</span></div>
+  </div>
+</header>
+
+<main>
+  <section class="input">
+    <div class="seg" role="radiogroup" aria-label="Boundary" id="boundary">
+      <button type="button" role="radio" data-b="prompt" aria-checked="true">Prompt</button>
+      <button type="button" role="radio" data-b="content" aria-checked="false">Content</button>
+      <button type="button" role="radio" data-b="outbound" aria-checked="false">Outbound</button>
+    </div>
+    <p class="hint-line" id="b-desc"></p>
+    <label for="text" class="label">Text</label>
+    <textarea id="text" spellcheck="false" placeholder="Paste or type text…" autofocus></textarea>
+    <div class="row">
+      <button id="run" type="button" class="primary">Inspect <kbd>Ctrl ↵</kbd></button>
+      <select id="samples" aria-label="Load a sample"><option value="">Load a sample…</option></select>
+      <label class="check"><input type="checkbox" id="nolev"> rules only</label>
+      <span class="meta" id="count">0 chars</span>
+    </div>
+    <p class="cli" id="cli"></p>
+    <p class="err" id="err" hidden></p>
+  </section>
+
+  <section id="out" hidden>
+    <div class="verdict">
+      <div class="v-block"><span class="k">Verdict</span><span class="v" id="verdict"></span></div>
+      <div class="v-block"><span class="k">Action</span><span class="v" id="action"></span><span class="v small" id="action-desc"></span></div>
+      <div class="v-block"><span class="k">lev score</span><span class="v" id="score"></span></div>
+      <div class="v-block timing"><span class="k">Cost</span><span class="v small" id="cost"></span></div>
+    </div>
+    <div class="gates" id="gates"></div>
+    <div class="hidden-text" id="hidden-text" hidden>
+      <strong>Hidden text decoded from invisible characters:</strong>
+      <code id="hidden-code"></code>
+    </div>
+
+    <article class="card wide" id="redacted-card" hidden>
+      <h2>Redacted text to send <span class="hint" id="redactions"></span></h2>
+      <pre class="redacted" id="redacted"></pre>
+      <div class="row"><button type="button" id="copy">Copy redacted</button></div>
+    </article>
+
+    <article class="card wide">
+      <h2>Findings <span class="hint" id="find-count"></span></h2>
+      <table class="tbl" id="findings">
+        <thead><tr><th>Severity</th><th>Finding</th><th>Source</th><th>Evidence</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p class="empty" id="no-findings" hidden>No findings. That means no signal, not "safe".</p>
+    </article>
+
+    <article class="card wide feedback">
+      <h2>Was this right? <span class="hint" id="fb-stats"></span></h2>
+      <div class="row">
+        <button type="button" class="fb" data-x="same">Correct</button>
+        <span class="meta-l">Should be:</span>
+        <button type="button" class="fb" data-x="allow">allow</button>
+        <button type="button" class="fb" data-x="review">review</button>
+        <button type="button" class="fb" data-x="block">block</button>
+        <input type="text" id="fb-note" placeholder="optional note" maxlength="500" aria-label="Feedback note">
+      </div>
+      <p class="detail" id="fb-msg">Labels are saved locally (text included) and become eval cases for <code>warden eval</code>.</p>
+    </article>
+
+    <details class="card wide raw">
+      <summary>Raw JSON</summary>
+      <pre id="raw"></pre>
+    </details>
+  </section>
+</main>
+</body>
+</html>

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Warden Router</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="walk.css">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<script src="common.js" defer></script>
+<script src="walk.js" defer></script>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <h1>Router walk <span class="tag">experimental</span></h1>
+    <p class="sub">Watch a prompt pass through the three gates live: rules, then security, then routing to an agent and model. Questions that can't change the decision are skipped. Nothing runs or answers the prompt.</p>
+  </div>
+  <div class="top-right">
+    <nav class="nav" data-page="router"></nav>
+    <div class="status" id="status"><span class="dot"></span><span id="status-text">checking lev…</span></div>
+  </div>
+</header>
+
+<main>
+  <section class="input">
+    <label for="prompt" class="label">Test prompt</label>
+    <textarea id="prompt" class="short" spellcheck="false" placeholder="Paste or type a prompt…" autofocus></textarea>
+    <div class="row">
+      <button id="run" type="button" class="primary">Walk <kbd>Ctrl ↵</kbd></button>
+      <select id="samples" aria-label="Load a sample prompt"><option value="">Load a sample…</option></select>
+      <label class="pace">Pace
+        <select id="pace">
+          <option value="60">Live</option>
+          <option value="350">Slow motion</option>
+        </select>
+      </label>
+      <span class="meta" id="count">0 chars</span>
+    </div>
+    <p class="err" id="err" hidden></p>
+  </section>
+
+  <div class="now" id="now" aria-live="polite"><span class="spinner" hidden id="spin"></span><span id="now-text">Enter a prompt and press Walk.</span><span class="clock" id="clock"></span></div>
+
+  <div class="walk">
+    <div class="board" id="board"></div>
+    <aside class="trace">
+      <h2>Trace <span class="hint">server time</span></h2>
+      <ol id="trace"></ol>
+    </aside>
+  </div>
+</main>
+</body>
+</html>

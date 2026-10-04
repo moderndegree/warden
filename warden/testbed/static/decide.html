@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Warden Decide</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="walk.css">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<script src="common.js" defer></script>
+<script src="decide.js" defer></script>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <h1>Decide</h1>
+    <p class="sub">Ask lev one question about each of many items: cheap triage, filtering and bucketing that a big model would otherwise do in its context.</p>
+  </div>
+  <div class="top-right">
+    <nav class="nav" data-page="decide"></nav>
+    <div class="status" id="status"><span class="dot"></span><span id="status-text">checking lev…</span></div>
+  </div>
+</header>
+
+<main>
+  <section class="input">
+    <div class="row">
+      <select id="preset" aria-label="Load an example"><option value="">Load an example…</option></select>
+    </div>
+    <div class="form-grid">
+      <label class="label" for="question">Question</label>
+      <input type="text" id="question" placeholder="Is this email something I need to act on?">
+      <label class="label" for="kind">Kind</label>
+      <select id="kind">
+        <option value="yes_no">Yes / no</option>
+        <option value="choice">Choice (pick one option)</option>
+        <option value="score">Score (ordered levels)</option>
+      </select>
+      <label class="label" for="options" id="options-label">Options <span class="hint">one per line: id = description</span></label>
+      <textarea id="options" class="short" spellcheck="false"></textarea>
+      <label class="label" for="context">Context <span class="hint">optional, shown with every item</span></label>
+      <input type="text" id="context">
+    </div>
+    <label class="label" for="items">Items <span class="hint">one per line</span></label>
+    <textarea id="items" spellcheck="false"></textarea>
+    <div class="row">
+      <button id="run" type="button" class="primary">Decide <kbd>Ctrl ↵</kbd></button>
+      <span class="meta" id="count"></span>
+    </div>
+    <p class="cli" id="cli"></p>
+    <p class="err" id="err" hidden></p>
+  </section>
+
+  <section id="out" hidden>
+    <div class="verdict three-col">
+      <div class="v-block"><span class="k">Items</span><span class="v" id="n"></span></div>
+      <div class="v-block"><span class="k">lev</span><span class="v small" id="cost"></span></div>
+      <div class="v-block"><span class="k">Per item</span><span class="v small" id="per"></span></div>
+    </div>
+    <article class="card wide">
+      <h2>Results</h2>
+      <div class="scroll">
+        <table class="tbl" id="results">
+          <thead><tr><th class="n">#</th><th>Item</th><th>Answer</th><th>Confidence</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </article>
+    <details class="card wide raw">
+      <summary>Raw JSON</summary>
+      <pre id="raw"></pre>
+    </details>
+  </section>
+</main>
+</body>
+</html>

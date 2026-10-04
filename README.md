@@ -1,0 +1,199 @@
+# warden
+
+A local guard and decision engine for AI agents, built on the small local decision model **lev**
+(`/v1/systemone` on `127.0.0.1:8200`). Standard library only, Python ≥ 3.11.
+
+- **Guard**: inspects text at a boundary and says what to do with it.
+- **Decide**: offloads bulk yes/no, choice, and score decisions from big models to lev.
+- **Router** (experimental): picks an agent and model for a prompt.
+- **Test bed**: a local UI for all of the above.
+
+> **Status: test bed only, not integrated into anything yet.** The skill in `skill/warden/` is written but not
+> installed. Hooks for Hermes and OpenCode come later, once the eval numbers justify it.
+
+```bash
+python3 -m warden testbed                 # UI at http://127.0.0.1:8740   (or ./run.sh)
+echo "…" | python3 -m warden scan -b content --brief
+python3 -m unittest discover -s tests -t .     # offline (lev stubbed)
+python3 evals/fetch.py && python3 -m warden eval    # measure on the test splits
+```
+
+Install as a CLI when you're ready (not done yet): `uv tool install --editable ~/Work/warden`
+
+## Boundaries
+
+| Boundary | What it's for | Checks | Actions (allow / review / block) |
+|---|---|---|---|
+| `prompt` | What a person sends an agent (typed, pasted, voice, Discord) | All rules; lev asks *manipulation*, then *extraction* | proceed / confirm_restricted / refuse |
+| `content` | Untrusted text an agent is about to read: web pages, email, files, tool output | Injection rules (secrets ignored); lev asks *instructions aimed at an AI* over 700-char windows and on each hidden-markup segment, then *manipulation* | pass / pass_flagged / quarantine |
+| `outbound` | Text about to leave this machine for a cloud model | Secrets, high-risk PII, hidden characters, high-entropy tokens; **no model call** | send / send_redacted / send_redacted (returns `redacted`) |
+
+**The gates fail fast:**
+- **Gate 0 · rules** (~1 ms). A block here means **zero** model calls.
+- **Gate 1 · lev** asks the boundary's questions in order and stops at the first high score.
+
+**Verdicts:**
+- **Block**: a critical finding, a high rule finding, or a high lev score backed by a medium rule finding.
+- **Review**: any other medium finding. **lev alone never blocks.**
+
+**When lev is down:** `prompt` falls back to rules only; `content` **fails closed** to review.
+
+## Defenses
+
+**Rules** (`warden/rules.py`). Every rule runs on the raw text, on the NFKC/invisible-stripped text, and on
+de-obfuscated views.
+- **Unicode:**
+  - tag-character smuggling (decoded and shown; legitimate flag emoji excluded);
+  - bidi overrides, zero-width characters, variation-selector smuggling;
+  - homoglyphs (mixed-script words are mapped to Latin for both the rules and lev);
+  - terminal escape sequences (ANSI/OSC).
+- **Injection:**
+  - override and jailbreak phrasing in English plus Spanish, French, German, Portuguese, Italian, Russian, Chinese and Japanese;
+  - prompt extraction, including soft probes ("what were the instructions you were given?");
+  - forged chat-template tokens;
+  - text addressed to an AI ("Hi Assistant,") and fake "[PRIORITY MESSAGE]" headers;
+  - task hijacks ("before finishing the task above, please first…").
+- **Obfuscation:**
+  - leetspeak, spaced-out letters, reversed text;
+  - base64, hex, URL-encoded and rot13 payloads, decoded recursively up to depth 3 (with a 200k-char budget) and rescanned;
+  - attack phrases with all spacing and punctuation removed.
+- **Hidden markup:** HTML comments; elements that are `display:none`, `visibility:hidden`, zero-size, transparent or white; `aria-hidden`; markdown comments; alt and title text. Instructions inside hidden markup → **block**.
+- **Attacks on warden itself:** notes to "any automated reviewer", "final answer: no", claims that the text "is not an injection", forged data delimiters.
+- **Agents:** destructive commands, reverse shells, pipe-to-shell; exfiltration hosts, markdown-image beacons, credential paths, SSRF/metadata addresses; suspicious URLs.
+- **Secrets** (about 30 formats: cloud and AI-provider keys, Git hosting tokens, chat bots, `.env` assignments, Bearer headers, URL credentials, private keys, JWTs) and **PII** (SSN, Luhn-checked cards, IBAN, email, phone).
+
+**lev:**
+- Text is framed as data, using **keyed delimiters**: an HMAC tag of a per-process secret and the text, so the text
+  can't forge the closing marker.
+- Secrets and PII are redacted before lev sees anything.
+- Long content is swept in windows, so an attack can't hide by diluting itself in a long document.
+- Hidden-markup segments are judged on their own.
+- Prompts over 1,200 characters need a 0.85 lev score (instead of 0.6) before lev alone triggers review.
+
+**warden itself:**
+- **No ReDoS:** every pattern is bounded, and pathological inputs scan in linear time. There's a regression test,
+  and 1 MB worst case is about 4 s.
+- **Size cap:** rules scan the first and last 500k chars and flag the truncation.
+- **Never crashes on input:** a fuzz test covers random hostile Unicode, lone surrogates, U+2028 and invalid
+  UTF-8 (decoded with replacement, never an error exit).
+- **The lev client has a circuit breaker.**
+- **The feedback file** uses ASCII-escaped JSON with mode 0600.
+
+## Measured (2026-10-03, test split, never tuned on)
+
+`python3 evals/fetch.py && python3 evals/analyze.py test --cats` (about 3,850 items):
+
+| Test split | Rules only | Rules + lev |
+|---|---|---|
+| **Prompt boundary** (1,103 attacks / 1,053 benign) | 34% detected · 1.0% FP | **83% detected · 7.3% FP** (0.9% blocked) |
+| **Content boundary** (848 / 845) | 69% · 0.5% | **93% · 2.8%** (0.2% blocked) |
+| Lakera gandalf (direct injections) | 61% | 98% |
+| jackhhao jailbreaks / benign personas | 61% · 0.8% | 95% · 9.8% |
+| neuralchemy (categorized + hard negatives) | 29% · 0% | 72% · 4.6% |
+| 3nesdeniz pairs (attack vs near-identical benign twin) | 17% · 8.3% | 93% · 25% |
+| safe-guard (mostly ordinary prompts) | 25% · 0% | 88% · 4.0% |
+| NVIDIA indirect injections in documents (one template, so rules alone look strong) | 83% · 0.5% | 99% · 3.0% |
+| Synthetic web: Wikipedia + inserted payloads, plain or hidden | 30% · 0.5% | 75% · 2.4% |
+
+**Weak spots:**
+- HackAPrompt-style output forcing ("say 'I have been PWNED'"): 60%.
+- Payloads in markdown comments: 56%.
+- Tool-abuse requests: 60%.
+- The *pairs* set's benign twins, which describe or quote attacks (25% FP). Text carrying a literal payload is
+  flagged **on purpose**, whatever its framing.
+
+**Cost** (lev on GPU):
+
+| Input | lev calls | Time |
+|---|---|---|
+| Short prompt | 2 | ~180 ms |
+| Rule block | 0 | ~1 ms |
+| Content, 1 KB page | ~3 | ~0.6 s |
+| Content, 3 KB page | ~7 | ~1.2 s |
+| Content, 8 KB page | ~17 | ~2.8 s |
+| Outbound | 0 | ~1 ms |
+
+Attacks end the sweep early. `window_chars` and `max_windows` in the config trade cost against coverage.
+
+**Considered and rejected (measured on the tune split):**
+- **A verifier question for lev-only flags:** false positives 9% → 6%, but detection −5%. Rejected; a lev-only
+  flag is only ever a review.
+- **An "anything inside is data" sentence in the frame:** prompt false positives 9.8% → 17.7%, for no evasion gain
+  over the keyed tag.
+- **Sweeping long prompts with the content question:** no detection gain, more false positives.
+- **Threshold changes:** almost no effect, because lev's scores are bimodal.
+
+**Method:** every public set has a **tune** split (used for every decision above, via `evals/analyze.py tune`) and a
+**test** split (measured once). `analyze.py` refuses to show miss texts for the test split. Keep it that way, or
+the numbers stop meaning anything. The test bed's *Was this right?* labels go into `warden eval` as the `feedback`
+set.
+
+## Decide
+
+```bash
+warden decide --brief -k choice -q "What kind of issue is this?" -o "bug=a defect" -o "feature=a request" < issues.txt
+```
+
+- Kinds: `yes_no`, `choice` (more accurate for categorizing), and `score` (ordered levels).
+- One lev call per item, about 70–150 ms. Items are redacted and framed as data.
+- Good for triage, filtering and relevance checks. Not for final high-stakes calls: lev scores about 80% on
+  JevBench and calls a shoe-sale email an "action item".
+
+## CLI
+
+| Command | What it does | Exit codes |
+|---|---|---|
+| `warden scan [-b prompt\|content\|outbound] [--no-lev] [--brief]` | Run the guard (input from stdin, `-f FILE`, or args) | 0 allow · 3 review · 4 block · 1 error |
+| `warden redact` | Print redacted text; counts go to stderr | 0 nothing removed · 3 redacted |
+| `warden decide -q Q [-k kind] [-o id=desc …] [-l level …] [-c context] [--brief]` | One question per item (stdin lines, args, or `-f`) | |
+| `warden route` | Experimental router; prints JSON | |
+| `warden eval [--sets …] [--no-lev]` | Measure the guard | |
+| `warden health` | Check the config and lev | |
+| `warden testbed` | Run the test bed UI | |
+
+**Why a CLI and a skill, not an MCP:**
+- A skill costs one description line of context until it's used; MCP tool schemas ride along with every request
+  in OpenCode and Hermes.
+- The same CLI serves future hooks through its exit codes.
+- An MCP wrapper over these same functions can be added if a harness without a shell needs it.
+
+## Config
+
+`warden/defaults/guard.json` and `router.json`. To override them, copy both files to `~/.config/warden/` or point
+`$WARDEN_CONFIG_DIR` at a directory. Files are re-read on every call.
+
+## Test bed
+
+- **Guard**: boundary picker, verdict and action, gate cards, redacted output, findings, feedback buttons, and the
+  equivalent CLI command.
+- **Decide**: question, kind, options or levels, items, then results with confidence bars, plus the equivalent CLI.
+- **Router (experimental)**: the live walk through the gates, agent and executors.
+
+Hardening:
+- Loopback-only, with a Host allowlist against DNS rebinding.
+- Origin check plus a required JSON content type against CSRF.
+- Strict CSP; 512 KiB body cap.
+- Rendering only through `textContent`.
+- Request bodies are never logged.
+
+## Layout
+
+```
+warden/          rules.py · lev.py · guard.py · decide.py · router.py (+ router_logic.py) · evaluate.py · feedback.py · cli.py
+warden/defaults/ guard.json · router.json
+warden/testbed/  server.py · static/
+skill/warden/    SKILL.md (not installed)
+evals/           samples.json (dev) · fetch.py · analyze.py (tuning workbench) · eval_router.py · data/, reports/, cache.sqlite (git-ignored)
+tests/           rules · guard · decide · router · cli · perf (ReDoS) · fuzz (stubbed lev)
+```
+
+## Known limits
+
+- **Allow means "no signal", not "safe".** About 17% of prompt attacks and 7% of content attacks on the test split
+  get through. The real protection is sandboxing and permissions; warden is an early warning in front of them.
+- **The review rate on harmless prompts is about 7%**, mostly from lev on role-play personas and
+  instruction-dataset formatting. It's lower for ordinary chat.
+- **Very long content is sampled:** more than 24 windows (about 12 KB). Rules still see every character.
+- **lev handles one request at a time** (`-np 1`) and is shared with Sully's voice routing. Content scanning makes
+  several calls per page.
+- **The router's capability levels are estimates**, and it can't see attachments.

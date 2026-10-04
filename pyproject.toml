@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "warden"
+version = "0.1.0"
+description = "Local guard and decision engine for AI agents: prompt-injection checks, secret redaction, and cheap typed decisions on a small local model (lev)."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+warden = "warden.cli:main"
+
+[tool.setuptools]
+packages = ["warden", "warden.testbed"]
+
+[tool.setuptools.package-data]
+warden = ["defaults/*.json"]
+"warden.testbed" = ["static/*"]
