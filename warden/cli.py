@@ -7,7 +7,7 @@
   warden classify [TEXT | -f FILE | stdin] [--sensitivity] [--guard] [--brief]
   warden route    [TEXT | -f FILE | stdin]            (experimental)
   warden eval     [--sets dev,feedback,gandalf,jailbreak,neuralchemy,pairs,safeguard,ipi,web] [--no-lev]
-  warden health
+  warden health   [--brief]
   warden testbed  [--port 8740]
 
 Exit codes (scan): 0 allow · 3 review · 4 block · 1 error · 2 usage. (redact): 0 nothing removed · 3 redacted.
@@ -117,11 +117,17 @@ def cmd_eval(args):
 
 
 def cmd_health(args):
-    from . import config
+    from . import availability, config
     from .lev import Lev
     cfg = config.load("guard.json")
     up = Lev(cfg["decision_model"]).health()
-    _out({"warden": __version__, "config_dir": str(config.config_dir()), "lev": cfg["decision_model"]["url"], "lev_up": up})
+    status = availability.check(force=True)
+    if args.brief:
+        print(f"lev {'up' if up else 'DOWN'} · " + " · ".join(f"{k} {'ok' if v['up'] else 'DOWN (' + v['why'] + ')'}"
+                                                         for k, v in status.items() if k != "lev"))
+    else:
+        _out({"warden": __version__, "config_dir": str(config.config_dir()), "lev": cfg["decision_model"]["url"],
+              "lev_up": up, "availability": status})
     return 0 if up else 1
 
 
@@ -179,7 +185,8 @@ def main(argv=None):
     p.add_argument("--no-lev", action="store_true", help="rules only, as a baseline")
     p.set_defaults(fn=cmd_eval)
 
-    p = sub.add_parser("health", help="check config and the decision model")
+    p = sub.add_parser("health", help="check config, lev, and what routes can use (local checks only)")
+    p.add_argument("--brief", action="store_true", help="one-line summary instead of JSON")
     p.set_defaults(fn=cmd_health)
 
     p = sub.add_parser("testbed", help="run the local test bed UI")

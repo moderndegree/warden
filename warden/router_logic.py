@@ -1,4 +1,5 @@
 """EXPERIMENTAL routing logic: agent selection and model fit within the chosen agent."""
+from .availability import missing
 
 
 def routing_questions(m):
@@ -27,9 +28,10 @@ def agent_axis(m, agent_id, expert):
     return m["agents"][agent_id].get("axis") or m["experts"][expert]["axis"]
 
 
-def score_executors(m, agent_id, axis, complexity, sec, sensitivity=None):
+def score_executors(m, agent_id, axis, complexity, sec, sensitivity=None, status=None):
     """Fit every executor of the agent. complexity None = not asked (single-executor agent).
-    sensitivity None = not asked (only asked when the best pick would leave this machine)."""
+    sensitivity None = not asked (only asked when the best pick would leave this machine).
+    status = availability.check() result; None = assume everything is up."""
     r, sm = m["routing"], m["sensitivity"]
     need = 1 + (complexity if complexity is not None else 0)
     force_local = []
@@ -54,13 +56,16 @@ def score_executors(m, agent_id, axis, complexity, sec, sensitivity=None):
         gap, surplus = max(0.0, need - cap), max(0.0, cap - need)
         fit = (r["base"] - r["gap_penalty"] * gap - r["cost_weight"] * mod["cost"] - r["overkill_penalty"] * surplus
                + (r["local_bonus"] if mod["route"] == "local" else 0) + mod.get("bonus", 0))
-        notes, eligible = [], True
+        notes, allowed = [], True
         if force_local and mod["route"] != "local":
-            eligible = False
+            allowed = False
             notes.append("must stay local: " + ", ".join(force_local))
         elif mod.get("privacy") == "public" and public_block:
-            eligible = False
+            allowed = False
             notes.append("free tier may log prompts: " + ", ".join(public_block))
+        down = missing(m, ex, status) if status else []
+        if down:
+            notes.append("unavailable: " + "; ".join(down))
         if gap > 0:
             notes.append(f"under by {gap:.1f}")
         elif surplus >= 2:
@@ -68,7 +73,7 @@ def score_executors(m, agent_id, axis, complexity, sec, sensitivity=None):
         rows.append({"id": ex["model"], "label": mod["label"], "via": ex["via"], "provider": mod.get("provider", ""),
                      "route": mod["route"], "privacy": mod.get("privacy", ""), "axis": axis, "cap": cap,
                      "need": round(need, 2), "gap": round(gap, 2), "cost": mod["cost"], "fit": round(fit, 2),
-                     "eligible": eligible, "notes": notes})
+                     "allowed": allowed, "available": not down, "eligible": allowed and not down, "notes": notes})
     ranked = sorted(rows, key=lambda x: (not x["eligible"], -x["fit"]))
     return rows, ranked, force_local
 
@@ -81,8 +86,19 @@ def decide_route(m, agent_id, ranked, force_local, sec, asked):
         reasons.append("Keep local: " + ", ".join(force_local) + ".")
     best = ranked[0] if ranked and ranked[0]["eligible"] else None
     if best is None:
+        down = [x for x in ranked if x["allowed"] and not x["available"]]
+        if force_local and down:
+            return {"decision": "held", "agent": agent_id, "agent_label": agent["label"], "model": None, "route": None,
+                    "reasons": reasons + [f"The local option is unavailable ({x['label']}: {', '.join(x['notes'])}). "
+                                          "Held: not sending to a cloud model instead." for x in down[:1]]}
+        if down:
+            return {"decision": "unavailable", "agent": agent_id, "agent_label": agent["label"], "model": None,
+                    "route": None, "reasons": reasons + [f"{x['label']} is {', '.join(x['notes'])}." for x in down]}
         return {"decision": "no eligible model", "agent": agent_id, "agent_label": agent["label"], "model": None,
                 "route": None, "reasons": reasons + ["No executor in this agent satisfies the constraints."]}
+    for x in ranked:
+        if x["allowed"] and not x["available"] and x["fit"] > best["fit"]:
+            reasons.append(f"Fell back from {x['label']}: {'; '.join(n for n in x['notes'] if n.startswith('unavailable'))}.")
     tied = [x["label"] for x in ranked[1:] if x["eligible"] and abs(x["fit"] - best["fit"]) < 0.05]
     if tied:
         reasons.append(f"Tied with {', '.join(tied)} (fit {best['fit']}); picked by agent order. "

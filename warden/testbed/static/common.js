@@ -47,6 +47,9 @@ async function health() {
     const r = await (await fetch("/api/health")).json();
     s.className = "status " + (r.decision_model_up ? "up" : "down");
     $("status-text").textContent = `warden ${r.warden} · ${r.decision_model} ${r.decision_model_up ? "online" : "offline (rules only)"}`;
+    const down = Object.values(r.availability || {}).filter((x) => !x.up);
+    if (down.length) $("status-text").textContent += ` · down: ${down.map((x) => x.label).join(", ")}`;
+    s.title = Object.values(r.availability || {}).map((x) => `${x.label}: ${x.why}`).join("\n");
   } catch {
     s.className = "status down";
     $("status-text").textContent = "server unreachable";

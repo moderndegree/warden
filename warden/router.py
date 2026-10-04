@@ -9,7 +9,7 @@ import threading
 import time
 from collections import OrderedDict
 
-from . import config
+from . import availability, config
 from .classify import choice_result as _choice, level_result as _level, state as classify_state
 from .guard import guard_events
 from .lev import Lev, DecisionError
@@ -19,13 +19,13 @@ from .router_logic import (agent_axis, choose_agent, decide_route, routing_quest
 _cache, _cache_lock = OrderedDict(), threading.Lock()
 
 
-def _walk(text, m, gcfg, lev):
+def _walk(text, m, gcfg, lev, status=None):
     t0 = time.monotonic()
     now = lambda: round((time.monotonic() - t0) * 1000, 1)
     res = {"chars": len(text), "est_prompt_tokens": int(len(text) / gcfg["chars_per_token"]), "hidden_text": None,
            "cached": False, "gates": [], "stopped_at": None, "security": None,
            "profile": {"expert": None, "mode": None, "complexity": None, "sensitivity": None, "skipped": {}},
-           "agent": None, "routing": None, "timings": None, "error": None}
+           "agent": None, "routing": None, "availability": None, "timings": None, "error": None}
     st = {"calls": 0, "lev_ms": 0, "tokens": 0}
 
     def finish():
@@ -63,6 +63,8 @@ def _walk(text, m, gcfg, lev):
     # ---- Gate 2: routing --------------------------------------------------------------------
     t_open, calls0 = now(), st["calls"]
     yield {"type": "gate", "gate": "routing", "t": now()}
+    status = res["availability"] = status if status is not None else availability.check(m)
+    yield {"type": "availability", "status": status, "t": now()}
     state = classify_state(text, m)
     prof = res["profile"]
 
@@ -100,7 +102,7 @@ def _walk(text, m, gcfg, lev):
             asked.add("complexity")
             yield {"type": "answer", "key": "complexity", "answer": a["complexity"], "ms": ms, "t": now()}
 
-        rows, ranked, force_local = score_executors(m, agent_id, axis, complexity, sec)
+        rows, ranked, force_local = score_executors(m, agent_id, axis, complexity, sec, status=status)
         yield {"type": "executors", "rows": rows, "phase": "fit", "t": now()}
 
         if ranked[0]["route"] == "local":
@@ -113,7 +115,7 @@ def _walk(text, m, gcfg, lev):
             prof["sensitivity"] = _level(m, "sensitivity", a["sensitivity"])
             asked.add("sensitivity")
             yield {"type": "answer", "key": "sensitivity", "answer": a["sensitivity"], "ms": ms, "t": now()}
-            rows, ranked, force_local = score_executors(m, agent_id, axis, complexity, sec, a["sensitivity"]["score"])
+            rows, ranked, force_local = score_executors(m, agent_id, axis, complexity, sec, a["sensitivity"]["score"], status)
             yield {"type": "executors", "rows": rows, "phase": "privacy", "t": now()}
 
         res["routing"] = {**decide_route(m, agent_id, ranked, force_local, sec, asked), "table": rows}
@@ -131,16 +133,18 @@ def _walk(text, m, gcfg, lev):
     yield finish()
 
 
-def route_events(text, m=None, gcfg=None, lev=None):
-    """Yield walk events. Repeats (same text + same configs) replay from cache with zero model calls."""
+def route_events(text, m=None, gcfg=None, lev=None, status=None):
+    """Yield walk events. Repeats (same text + same configs + same availability) replay from cache with zero
+    model calls. status: an availability.check() result; None = check now."""
     explicit = any(x is not None for x in (m, gcfg, lev))
     m = m or config.load("router.json")
     gcfg = gcfg or config.load("guard.json")
     lev = lev or Lev(gcfg["decision_model"])
+    status = status if status is not None else availability.check(m)
     key = None
     if not explicit:
         key = (hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest(), config.mtime("router.json"),
-               config.mtime("guard.json"))
+               config.mtime("guard.json"), tuple(sorted((k, v["up"]) for k, v in status.items())))
         with _cache_lock:
             hit = _cache.get(key)
             if hit:
@@ -155,7 +159,7 @@ def route_events(text, m=None, gcfg=None, lev=None):
                     yield ev
             return
     events = []
-    for ev in _walk(text, m, gcfg, lev):
+    for ev in _walk(text, m, gcfg, lev, status):
         events.append(ev)
         # Store before yielding the final event: callers like route() stop reading at "result".
         if ev["type"] == "result" and key and not ev["result"]["error"]:
@@ -166,7 +170,7 @@ def route_events(text, m=None, gcfg=None, lev=None):
         yield ev
 
 
-def route(text, m=None, gcfg=None, lev=None):
-    for ev in route_events(text, m, gcfg, lev):
+def route(text, m=None, gcfg=None, lev=None, status=None):
+    for ev in route_events(text, m, gcfg, lev, status):
         if ev["type"] == "result":
             return ev["result"]

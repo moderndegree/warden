@@ -169,6 +169,27 @@ warden answers with that pair, and consumers map it to a concrete harness. Label
   shows tier accuracy, agent accuracy, local-vs-frontier with frontier recall and precision, confusion matrices,
   and majority baselines. lev answers are cached in `evals/cache.sqlite`.
 
+## Availability
+
+A route never points at something that can't run right now. Every check is local:
+
+| Check | How |
+|---|---|
+| lev (:8200), Halogen (:8731) | Loopback `/health`. Non-loopback URLs are refused. |
+| Grok Build | `grok` on PATH, and `~/.grok/auth.json` has a sign-in with a refresh token |
+| Claude Code | `claude` on PATH, and `~/.claude/.credentials.json` exists (it isn't parsed) |
+| OpenCode, Hermes | On PATH |
+| OpenRouter | `opencode`'s auth file has an `openrouter` entry |
+
+- **No remote calls:** nothing calls a remote or paid API, and no credential value is ever read into output. As
+  a result, a revoked token still looks signed in.
+- **Caching:** results are cached for 15 s and are part of the router's cache key.
+- **Fallback:** a route to something that's down falls back to the next executor, and the reasons say what it fell
+  back from and why.
+- **Held:** text that must stay local (secrets, high-risk PII, high sensitivity) is **held** when the local model is
+  down. It's never sent to a cloud model instead.
+- **Config:** `router.json` → `availability`. Models and executors name what they depend on in `needs`.
+
 ## CLI
 
 | Command | What it does | Exit codes |
@@ -179,7 +200,7 @@ warden answers with that pair, and consumers map it to a concrete harness. Label
 | `warden classify [--sensitivity] [--guard] [--brief]` | Expert + mode (+ sensitivity) and the workflow they map to | 0 ok · 4 stopped by `--guard` · 1 lev down |
 | `warden route` | Experimental router; prints JSON | |
 | `warden eval [--sets …] [--no-lev]` | Measure the guard | |
-| `warden health` | Check the config and lev | |
+| `warden health [--brief]` | Check the config, lev, and what routes can use | 0 lev up · 1 lev down |
 | `warden testbed` | Run the test bed UI | |
 
 **Why a CLI and a skill, not an MCP:**

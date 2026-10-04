@@ -37,7 +37,7 @@ class Classify(unittest.TestCase):
         from warden.router import route
         a, b = StubLev(), StubLev()
         classify("Write a function.", m=self.m, gcfg=self.g, lev=a)
-        route("Write a function.", self.m, self.g, b)
+        route("Write a function.", self.m, self.g, b, status={})
         self.assertEqual(a.states[0], b.states[2])          # router: 2 guard calls, then expert
 
     def test_secrets_redacted_before_lev(self):

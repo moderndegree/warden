@@ -336,6 +336,11 @@ function apply(ev) {
       trace(ev.t, `route → ${rt.model ? rt.route + " · " + rt.model : rt.decision}`, rt.decision === "blocked" ? "bad" : "ok");
       break;
     }
+    case "availability": {
+      const down = Object.values(ev.status).filter((x) => !x.up);
+      trace(ev.t, down.length ? `unavailable: ${down.map((x) => `${x.label} (${x.why})`).join(", ")}` : "all executors' services available", down.length ? "warn" : "");
+      break;
+    }
     case "error":
       $("err").textContent = ev.error;
       $("err").hidden = false;

@@ -125,7 +125,10 @@
       "executors": [
         {
           "model": "qwen3.8-flash",
-          "via": "Hermes · sully profile"
+          "via": "Hermes · sully profile",
+          "needs": [
+            "hermes"
+          ]
         }
       ]
     },
@@ -148,7 +151,10 @@
       "executors": [
         {
           "model": "qwen3.8-flash",
-          "via": "OpenCode · build"
+          "via": "OpenCode · build",
+          "needs": [
+            "opencode"
+          ]
         },
         {
           "model": "grok-4.7-build-fast",
@@ -186,7 +192,10 @@
       "executors": [
         {
           "model": "qwen3.8-flash",
-          "via": "OpenCode · plan"
+          "via": "OpenCode · plan",
+          "needs": [
+            "opencode"
+          ]
         },
         {
           "model": "grok-4.7",
@@ -220,11 +229,17 @@
       "executors": [
         {
           "model": "qwen3.8-flash",
-          "via": "OpenCode · quick"
+          "via": "OpenCode · quick",
+          "needs": [
+            "opencode"
+          ]
         },
         {
           "model": "openrouter/free",
-          "via": "OpenCode · OpenRouter free router"
+          "via": "OpenCode · OpenRouter free router",
+          "needs": [
+            "opencode"
+          ]
         },
         {
           "model": "claude-haiku-4-5",
@@ -258,7 +273,10 @@
       "executors": [
         {
           "model": "qwen3.8-flash",
-          "via": "Hermes · web tools"
+          "via": "Hermes · web tools",
+          "needs": [
+            "hermes"
+          ]
         },
         {
           "model": "grok-4.7",
@@ -289,11 +307,17 @@
       "executors": [
         {
           "model": "qwen3.8-flash",
-          "via": "Hermes"
+          "via": "Hermes",
+          "needs": [
+            "hermes"
+          ]
         },
         {
           "model": "openrouter/free",
-          "via": "Hermes · OpenRouter free router"
+          "via": "Hermes · OpenRouter free router",
+          "needs": [
+            "hermes"
+          ]
         },
         {
           "model": "claude-haiku-4-5",
@@ -329,7 +353,10 @@
       "context": 131072,
       "vision": true,
       "cost": 0,
-      "latency": 1
+      "latency": 1,
+      "needs": [
+        "halogen"
+      ]
     },
     "openrouter/free": {
       "label": "OpenRouter Free Router",
@@ -349,7 +376,10 @@
       "vision": false,
       "cost": 0,
       "latency": 2,
-      "note": "Picks a random free model per request: quality varies, rate-limited, prompts may be logged."
+      "note": "Picks a random free model per request: quality varies, rate-limited, prompts may be logged.",
+      "needs": [
+        "openrouter"
+      ]
     },
     "claude-haiku-4-5": {
       "label": "Claude Haiku 4.5",
@@ -368,7 +398,10 @@
       "context": 200000,
       "vision": true,
       "cost": 1,
-      "latency": 1
+      "latency": 1,
+      "needs": [
+        "claude"
+      ]
     },
     "grok-4.7-build-fast": {
       "label": "Grok 4.7 Build Fast (Grok Build)",
@@ -387,7 +420,10 @@
       "context": 256000,
       "vision": false,
       "cost": 1,
-      "latency": 1
+      "latency": 1,
+      "needs": [
+        "grok"
+      ]
     },
     "claude-sonnet-5-5": {
       "label": "Claude Sonnet 5.5",
@@ -406,7 +442,10 @@
       "context": 200000,
       "vision": true,
       "cost": 2,
-      "latency": 2
+      "latency": 2,
+      "needs": [
+        "claude"
+      ]
     },
     "grok-4.7": {
       "label": "Grok 4.7 (Grok Build)",
@@ -425,7 +464,10 @@
       "context": 256000,
       "vision": true,
       "cost": 2,
-      "latency": 2
+      "latency": 2,
+      "needs": [
+        "grok"
+      ]
     },
     "claude-opus-5-5": {
       "label": "Claude Opus 5.5",
@@ -444,7 +486,10 @@
       "context": 200000,
       "vision": true,
       "cost": 3,
-      "latency": 3
+      "latency": 3,
+      "needs": [
+        "claude"
+      ]
     }
   },
   "routing": {
@@ -455,5 +500,50 @@
     "overkill_penalty": 0.25,
     "local_bonus": 0.75,
     "chars_per_token": 3.5
+  },
+  "_availability_comment": "Local checks only (loopback /health, PATH, sign-in files; never a remote or paid API), cached ttl_s. A model's and executor's 'needs' name checks here; an executor whose needs are down is skipped and the route says why. Text that must stay local is held, never sent to the cloud, when no local executor is up.",
+  "availability": {
+    "ttl_s": 15,
+    "checks": {
+      "lev": {
+        "label": "lev (decision model)",
+        "kind": "http",
+        "url": "http://127.0.0.1:8200/health"
+      },
+      "halogen": {
+        "label": "Halogen (local model)",
+        "kind": "http",
+        "url": "http://127.0.0.1:8731/health"
+      },
+      "grok": {
+        "label": "Grok Build",
+        "kind": "auth",
+        "bin": "grok",
+        "file": "~/.grok/auth.json",
+        "field": "refresh_token"
+      },
+      "claude": {
+        "label": "Claude Code",
+        "kind": "auth",
+        "bin": "claude",
+        "file": "~/.claude/.credentials.json"
+      },
+      "opencode": {
+        "label": "OpenCode",
+        "kind": "bin",
+        "bin": "opencode"
+      },
+      "hermes": {
+        "label": "Hermes",
+        "kind": "bin",
+        "bin": "hermes"
+      },
+      "openrouter": {
+        "label": "OpenRouter (via OpenCode)",
+        "kind": "auth",
+        "file": "~/.local/share/opencode/auth.json",
+        "key": "openrouter"
+      }
+    }
   }
 }

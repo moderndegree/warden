@@ -9,7 +9,7 @@ import mimetypes
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from .. import __version__, config, feedback, labels
+from .. import __version__, availability, config, feedback, labels
 from ..classify import classify
 from ..decide import decide
 from ..guard import BOUNDARIES, guard_events, inspect
@@ -100,7 +100,8 @@ class Handler(BaseHTTPRequestHandler):
             g = config.load("guard.json")
             return self._send(200, {"warden": __version__, "config_dir": str(config.config_dir()),
                                     "decision_model": g["decision_model"]["model"],
-                                    "decision_model_up": Lev(g["decision_model"]).health()})
+                                    "decision_model_up": Lev(g["decision_model"]).health(),
+                                    "availability": availability.check()})
         if path == "/api/guard/config":
             return self._send(200, config.load("guard.json"))
         if path == "/api/router/config":

@@ -49,7 +49,7 @@ def predict(rows, lev, m, g, pace=0):
     out = []
     for i, x in enumerate(rows):
         miss0 = lev.misses
-        r = route(x["text"], m, g, lev)
+        r = route(x["text"], m, g, lev, status={})          # measure routing, not what happens to be up now
         out.append({**x, "pred": {"tier": tier_of(r), "workflow": r["agent"] and r["agent"]["id"]},
                     "lev_calls": r["timings"]["lev_calls"], "lev_ms": r["timings"]["lev_ms"],
                     "profile": {k: (v and (v.get("id") or v.get("score"))) for k, v in r["profile"].items() if k != "skipped"}})
