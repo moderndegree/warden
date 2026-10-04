@@ -333,3 +333,13 @@ tests/           rules · guard · classify · escalate · availability · decid
   several calls per page.
 - **Model choice within a tier uses estimated capability levels** and hasn't been measured. The router can't see
   attachments.
+
+## Acknowledgements
+
+warden is influenced by **Jev** from **Typesafe AI** ([typesafe.ai](https://typesafe.ai)), a typed-decision API.
+Instead of generating text, Jev answers typed questions about a piece of state: **choice** (pick one option),
+**score** (an ordered level) and **noul** (yes/no), each with probabilities. warden's guard, decide, classify,
+escalate and router are all built on that interface.
+
+warden runs it against **lev**, a small local model served on the same `/v1/systemone` shape. lev was chosen
+using JevBench, an open benchmark for typed decision models in the spirit of Jev.
