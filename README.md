@@ -7,7 +7,7 @@ A local guard and decision engine for AI agents, built on the small local decisi
 - **Classify**: what expertise a prompt needs and what the user wants done (2 lev calls).
 - **Escalate**: should a local agent hand a task to a frontier model now? (one lev call, or none)
 - **Decide**: offloads bulk yes/no, choice, and score decisions from big models to lev.
-- **Router** (experimental): picks an agent and model for a prompt.
+- **Router** (experimental): picks a workflow and a tier (local / frontier / blocked), then a model, for a prompt.
 - **Test bed**: a local UI for all of the above.
 
 > **Status: test bed only, not integrated into anything yet.** The skill in `skill/warden/` is written but not
@@ -154,21 +154,68 @@ echo "fix the failing test in auth.py" | warden classify --brief
 - `--sensitivity` adds a 0–4 privacy score (+1 call); `--guard` runs the prompt guard first and stops on block.
 - The **workflow** is the router's mapping of expert + mode; it costs no extra call.
 
-## Routing labels
+## Routing
 
-The routing convention is **workflow × tier**:
-- **Workflow** is one of `router.json`'s agents: `voice_home`, `code_build`, `code_plan`, `tech_qa`, `research`
+```bash
+warden route "Plan a zero-downtime move from Docker Compose to Podman quadlets" | jq .routing
+# {"tier": "frontier", "workflow": "code_plan", "via": "Grok Build -m grok-4.7 (plan)", "reasons": [...], ...}
+```
+
+**The convention is workflow × tier.** warden answers with that pair and consumers map it to a concrete harness.
+The default `router.json` maps it to this machine's harnesses: each agent's local executor for `local`, and its
+cloud executors for `frontier`.
+- **Workflow:** one of `router.json`'s agents: `voice_home`, `code_build`, `code_plan`, `tech_qa`, `research`
   or `assistant`.
-- **Tier** is `local`, `frontier` or `blocked`.
+- **Tier:** `local`, `frontier` or `blocked`.
 
-warden answers with that pair, and consumers map it to a concrete harness. Labels use the same pair.
+**How the decision is made:**
+1. **Guard:** a block means `blocked`.
+2. **Expert + mode** pick the workflow.
+3. **Rules** that find secrets or high-risk PII keep it local, and complexity isn't asked.
+4. **lev's complexity score:** ≥ `tier.complexity_min` (2.0) means `frontier`.
+5. **Sensitivity** is asked only before anything would leave the machine. At ≥ 2.0 ("private personal
+   information") it keeps the request local.
+6. **Executor fit:** the old fit formula now only picks the model **within** the tier. A frontier executor must
+   beat the local one on the workflow's axis.
+7. **Availability:** fallbacks between tiers say why. `planned_tier` keeps what was asked for.
 
-- **Seed set:** `evals/routing/seed.jsonl` has 100 prompts in six areas: code, sysadmin, home, research, writing
-  and edge cases. Each has a fixed tune/test split. Prompts labelled live on the Router page are split by hash.
-- **Where labels live:** `~/.local/state/warden/labels-routing.jsonl` (0600, append-only, the latest label wins).
-- **Measure:** `python3 evals/eval_routing.py tune --misses 20` while tuning, `… test` once for the report. It
-  shows tier accuracy, agent accuracy, local-vs-frontier with frontier recall and precision, confusion matrices,
-  and majority baselines. lev answers are cached in `evals/cache.sqlite`.
+**Measured** (2026-10-04, Claude's **drafted** labels, not yet confirmed by you; the tier rule was chosen on tune
+only, and test was run once):
+
+| Split | Router | Tier | Frontier recall · precision | Workflow (agent) | lev calls |
+|---|---|---|---|---|---|
+| tune (51) | old: fit formula | 78% | 1/12 · 1/1 | 88% | 4.7 |
+| tune (51) | **new: complexity ≥ 2.0** | **90%** | **11/12 · 11/15** | 88% | 5.0 |
+| test (49) | old | 82% | 1/10 · 1/1 | 73% | 4.7 |
+| test (49) | **new** | **84%** | **7/10 · 7/12** | 73% | 5.0 |
+| test | always local (baseline) | 78% | 0/10 | 31% (always `code_build`) | |
+
+- **The tier gain on test is small,** +1 item over the old router and +3 over always-local. The real change is
+  that hard tasks now leave the machine: frontier recall went from 10% to 70%, at the cost of 5 of 38 local tasks
+  sent to frontier. `warden escalate` is the safety net for the hard tasks that stay local.
+- **Workflow accuracy fell from 88% on tune to 73% on test,** and nothing in the workflow mapping was tuned. The
+  main confusion is mode: questions about a system ("is it safe to run…", "how do I…") read as *act* and go to
+  `code_build` instead of `tech_qa`. There's also research vs `tech_qa` vs `assistant`. Merging `tech_qa` into
+  `code_build` is the obvious next experiment.
+- **Considered and rejected (tune):**
+  - three yes/no "does this need a frontier model?" phrasings. One never fired; one fired on 41–57% of
+    everything.
+  - complexity thresholds from 1.75 to 3.0. 2.0 and 2.25 tie on accuracy, and 2.25 is more local-first (recall
+    7/12, precision 7/8). Set `tier.complexity_min` to 2.25 if you'd rather escalate than over-send.
+  - keeping sensitivity's force-local at 3.0. It never fired.
+- **The labels are my best guesses.** n≈50 per split, so ±7–10 points. Confirm them in the test bed and rerun.
+
+**Labels and evals:**
+- **Seed set:** `evals/routing/seed.jsonl` has 100 prompts in six areas, each with a fixed tune/test split and
+  Claude's draft label. The Labels page prefills the draft for you to confirm or change. Prompts labelled live on
+  the Router page are split by hash.
+- **Where your labels live:** `~/.local/state/warden/labels-routing.jsonl` (0600, append-only, the latest label
+  wins).
+- **Scripts:**
+  - `evals/eval_routing.py tune|test [--drafts]`: end to end;
+  - `evals/routing_policies.py tune|test [--drafts]`: offline policy comparison.
+
+  Both use the lev cache in `evals/cache.sqlite`.
 
 ## Escalate
 
@@ -188,13 +235,17 @@ echo "Edited auth.py 3 times; same AssertionError every run. Not sure why." | wa
 - **Eval:** `evals/escalation/seed.jsonl` has 60 drafted (task, tried) pairs with a fixed tune/test split. You
   confirm or flip each draft in the test bed (Labels → escalation). Then run
   `python3 evals/eval_escalation.py tune [--questions] [--grid]` while tuning and `… test` once.
-- **Preliminary (tune split, Claude's drafted labels, not yours):**
-  - lev alone 29/30;
-  - rules alone 24/30;
-  - rules + lev 30/30, at 0.83 lev calls per item.
+- **Measured** (2026-10-04, Claude's **drafted** labels, not yet confirmed by you):
 
-  The configured question beat three alternative phrasings (28–29/30), and the threshold barely matters
-  (bimodal scores). The drafts are cleaner than real agent summaries, so expect lower numbers on real ones.
+  | Split | lev only | rules only | rules + lev (shipped) | lev calls |
+  |---|---|---|---|---|
+  | tune (30) | 29/30 | 24/30 | 30/30 | 0.83 |
+  | test (30, once) | 29/30 | 24/30 | **30/30** | 0.87 |
+
+  The configured question beat three alternative phrasings on tune (28–29/30), and the threshold barely matters
+  (bimodal scores). **This is optimistic:** the same author (Claude) wrote the examples, the drafts and the rule
+  patterns, and the summaries are cleaner than real ones. A dozen summaries from real stuck local sessions would
+  be the honest test.
 
 ## Availability
 
@@ -280,4 +331,5 @@ tests/           rules · guard · classify · escalate · availability · decid
 - **Very long content is sampled:** more than 24 windows (about 12 KB). Rules still see every character.
 - **lev handles one request at a time** (`-np 1`) and is shared with Sully's voice routing. Content scanning makes
   several calls per page.
-- **The router's capability levels are estimates**, and it can't see attachments.
+- **Model choice within a tier uses estimated capability levels** and hasn't been measured. The router can't see
+  attachments.
