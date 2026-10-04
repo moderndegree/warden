@@ -1,8 +1,11 @@
 """EXPERIMENTAL: pick an agent and model for a prompt, after the guard has passed it.
 
 Gates 0-1 are the guard's prompt boundary (warden.guard). Gate 2 asks lev only what can change the answer:
-expert + mode -> agent; complexity -> model within the agent (skipped for one-model agents); sensitivity
-only when the pick would leave this machine. Classifies only; never runs, answers, or forwards the prompt.
+expert + mode -> workflow (agent); complexity -> tier (local / frontier; skipped when the workflow is local-only
+or the rules found secrets/PII); sensitivity only before something would leave this machine. The executor fit
+then picks a model within the tier among what is available. The result's routing carries the convention:
+{"tier": local | frontier | blocked, "workflow": <agent id>} plus the chosen executor.
+Classifies only; never runs, answers, or forwards the prompt.
 """
 import hashlib
 import threading
@@ -13,8 +16,8 @@ from . import availability, config
 from .classify import choice_result as _choice, level_result as _level, state as classify_state
 from .guard import guard_events
 from .lev import Lev, DecisionError
-from .router_logic import (agent_axis, choose_agent, decide_route, routing_questions, score_executors,
-                           score_question)
+from .router_logic import (agent_axis, choose_agent, choose_tier, decide_route, routing_questions, rules_local,
+                           score_executors, score_question)
 
 _cache, _cache_lock = OrderedDict(), threading.Lock()
 
@@ -54,8 +57,9 @@ def _walk(text, m, gcfg, lev, status=None):
         why = (f"Security verdict {sec['status'].upper()}: not sent to any model, routing skipped." if not g["degraded"]
                else "Decision model unavailable; only the rules gate ran.")
         yield {"type": "gate_skipped", "gate": "routing", "reason": f"stopped at {res['stopped_at']}" if not g["degraded"] else "lev unavailable", "t": now()}
-        res["routing"] = {"decision": "blocked" if not g["degraded"] else "unavailable", "agent": None, "model": None,
-                          "route": None, "table": [], "reasons": [why]}
+        res["routing"] = {"decision": "blocked" if not g["degraded"] else "unavailable",
+                          "tier": "blocked" if not g["degraded"] else None, "workflow": None, "agent": None,
+                          "model": None, "route": None, "table": [], "reasons": [why]}
         yield {"type": "route", "routing": res["routing"], "t": now()}
         yield finish()
         return
@@ -90,10 +94,13 @@ def _walk(text, m, gcfg, lev, status=None):
                         "executors": len(ag["executors"])}
         yield {"type": "agent", **res["agent"], "t": now()}
 
-        asked, complexity = set(), None
-        if len(ag["executors"]) == 1:
-            prof["skipped"]["complexity"] = "agent has one executor"
-            yield {"type": "skip", "key": "complexity", "reason": prof["skipped"]["complexity"], "t": now()}
+        asked, complexity, sensitivity, tier, tier_why = set(), None, None, "local", []
+        keep_local = rules_local(sec)
+        if not any(m["models"][e["model"]]["route"] != "local" for e in ag["executors"]):
+            prof["skipped"]["complexity"] = "workflow has no frontier executor"
+        elif keep_local:
+            prof["skipped"]["complexity"] = "must stay local: " + ", ".join(keep_local)
+            tier_why = ["Keep local: " + ", ".join(keep_local) + "."]
         else:
             yield {"type": "ask", "key": "complexity", "t": now()}
             a, ms = ask(score_question(m, "complexity"))
@@ -101,24 +108,36 @@ def _walk(text, m, gcfg, lev, status=None):
             complexity = a["complexity"]["score"]
             asked.add("complexity")
             yield {"type": "answer", "key": "complexity", "answer": a["complexity"], "ms": ms, "t": now()}
+            tier, tier_why = choose_tier(m, complexity)
+        if "complexity" in prof["skipped"]:
+            yield {"type": "skip", "key": "complexity", "reason": prof["skipped"]["complexity"], "t": now()}
 
-        rows, ranked, force_local = score_executors(m, agent_id, axis, complexity, sec, status=status)
-        yield {"type": "executors", "rows": rows, "phase": "fit", "t": now()}
-
-        if ranked[0]["route"] == "local":
-            prof["skipped"]["sensitivity"] = ("already local (rules found secrets/PII)" if force_local
-                                              else "best pick is local; nothing leaves this machine")
-            yield {"type": "skip", "key": "sensitivity", "reason": prof["skipped"]["sensitivity"], "t": now()}
-        else:
+        def ask_sensitivity():
             yield {"type": "ask", "key": "sensitivity", "t": now()}
             a, ms = ask(score_question(m, "sensitivity"))
             prof["sensitivity"] = _level(m, "sensitivity", a["sensitivity"])
             asked.add("sensitivity")
             yield {"type": "answer", "key": "sensitivity", "answer": a["sensitivity"], "ms": ms, "t": now()}
-            rows, ranked, force_local = score_executors(m, agent_id, axis, complexity, sec, a["sensitivity"]["score"], status)
-            yield {"type": "executors", "rows": rows, "phase": "privacy", "t": now()}
 
-        res["routing"] = {**decide_route(m, agent_id, ranked, force_local, sec, asked), "table": rows}
+        if tier == "frontier":                       # ask only before something would leave this machine
+            yield from ask_sensitivity()
+            sensitivity = prof["sensitivity"]["score"]
+            tier, tier_why = choose_tier(m, complexity, sensitivity)
+        yield {"type": "tier", "tier": tier, "reasons": tier_why, "t": now()}
+
+        rows, ranked, force_local = score_executors(m, agent_id, axis, complexity, sec, sensitivity, status, tier)
+        if ranked[0]["eligible"] and ranked[0]["route"] != "local" and sensitivity is None:
+            # Local tier, but nothing local is available: check sensitivity before falling back to the cloud.
+            yield from ask_sensitivity()
+            sensitivity = prof["sensitivity"]["score"]
+            rows, ranked, force_local = score_executors(m, agent_id, axis, complexity, sec, sensitivity, status, tier)
+        if "sensitivity" not in asked:
+            prof["skipped"]["sensitivity"] = ("must stay local (rules found secrets/PII)" if keep_local
+                                              else "tier is local; nothing leaves this machine")
+            yield {"type": "skip", "key": "sensitivity", "reason": prof["skipped"]["sensitivity"], "t": now()}
+        yield {"type": "executors", "rows": rows, "phase": "fit", "t": now()}
+
+        res["routing"] = {**decide_route(m, agent_id, ranked, force_local, sec, asked, tier, tier_why), "table": rows}
         yield {"type": "route", "routing": res["routing"], "t": now()}
     except DecisionError as e:
         res["error"] = str(e)

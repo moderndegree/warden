@@ -40,7 +40,8 @@ class Testbed(TempLabels):
             with urllib.request.urlopen(req) as r:
                 return r.status, json.load(r)
         except urllib.error.HTTPError as e:
-            return e.code, json.load(e)
+            with e:
+                return e.code, json.load(e)
 
     def test_classify(self):
         code, r = self.post("/api/classify", {"text": "turn off the lights", "sensitivity": True})

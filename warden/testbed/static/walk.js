@@ -14,9 +14,9 @@ const STAGES = [
   ["expert", "routing", "Expert", "lev · choice"],
   ["mode", "routing", "Mode", "lev · choice"],
   ["agent", "routing", "Agent", "first agent whose experts and modes both match"],
-  ["complexity", "routing", "Complexity", "lev · score · skipped for one-model agents"],
-  ["executors", "routing", "Executors", "fit = capability vs need − cost − overkill ± constraints"],
-  ["sensitivity", "routing", "Data sensitivity", "lev · score · only if the pick would leave this machine"],
+  ["complexity", "routing", "Complexity → tier", "lev · score · frontier above the threshold · skipped for local-only workflows or secrets"],
+  ["sensitivity", "routing", "Data sensitivity", "lev · score · only before anything would leave this machine"],
+  ["executors", "routing", "Executors", "fit picks the model within the tier, among what is available"],
   ["decision", "routing", "Decision", ""],
 ];
 const GATES = { rules: "Gate 0 · Rules", security: "Gate 1 · Security", routing: "Gate 2 · Routing" };
@@ -327,7 +327,7 @@ function apply(ev) {
       if (rt.decision !== "blocked" && rt.decision !== "unavailable") activate("decision");
       if (rt.model && ui.rows[rt.model]) ui.rows[rt.model].tr.className = "win";
       const head = rt.decision === "blocked" ? "BLOCKED — not sent to any model"
-        : rt.model ? `→ ${rt.route.toUpperCase()} · ${rt.agent_label} · ${rt.model_label}` : rt.decision.toUpperCase();
+        : rt.model ? `→ ${(rt.tier || rt.route).toUpperCase()} · ${rt.agent_label} · ${rt.model_label}` : rt.decision.toUpperCase();
       ui.decision.className = "decision " + (rt.route || rt.decision.split(" ")[0]);
       ui.decision.replaceChildren(head, rt.via ? el("div", { class: "via" }, `run via: ${rt.via}`) : "",
         el("ul", {}, ...(rt.reasons || []).map((x) => el("li", {}, x))));
@@ -336,6 +336,9 @@ function apply(ev) {
       trace(ev.t, `route → ${rt.model ? rt.route + " · " + rt.model : rt.decision}`, rt.decision === "blocked" ? "bad" : "ok");
       break;
     }
+    case "tier":
+      trace(ev.t, `tier → ${ev.tier}${ev.reasons.length ? " · " + ev.reasons.join(" ") : ""}`, ev.tier === "frontier" ? "warn" : "ok");
+      break;
     case "availability": {
       const down = Object.values(ev.status).filter((x) => !x.up);
       trace(ev.t, down.length ? `unavailable: ${down.map((x) => `${x.label} (${x.why})`).join(", ")}` : "all executors' services available", down.length ? "warn" : "");

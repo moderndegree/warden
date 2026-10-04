@@ -1,5 +1,5 @@
 {
-  "_comment": "EXPERIMENTAL router config (warden.router). Runs after the guard's prompt boundary (config/guard.json): expert + mode pick the agent, complexity picks the model within it; sensitivity is asked only if the pick would leave this machine.",
+  "_comment": "EXPERIMENTAL router config (warden.router). Runs after the guard's prompt boundary (config/guard.json): expert + mode pick the workflow (agents below); complexity picks the tier (local / frontier, see 'tier'); sensitivity is asked only for frontier; the executor fit then picks a model within the tier, among what is available.",
   "gates": {
     "_comment": "Verdicts that stop the walk at the gate where they appear.",
     "stop_on": [
@@ -102,7 +102,7 @@
       "confidential business or legal information",
       "secrets: passwords, API keys, credentials, financial account or ID numbers"
     ],
-    "force_local": 3.0,
+    "force_local": 2.0,
     "public_max": 1.5
   },
   "_agents_comment": "First agent whose experts AND modes match wins (dict order); otherwise fallback_agent. 'axis' overrides the expert's capability axis. Executors are the harness + model choices; the model is picked by fit within this list. 'via' is how you'd run it.",
@@ -574,5 +574,9 @@
         "\\bwaiting (on|for) the user\\b"
       ]
     }
+  },
+  "tier": {
+    "_comment": "Coarse tier, measured on routing labels (evals/routing_policies.py): frontier when lev's complexity score >= complexity_min, unless secrets/PII (rules) or sensitivity >= sensitivity.force_local keep it local. Within the tier, the executor fit below only picks the model; a frontier executor must beat the local one on the agent's axis.",
+    "complexity_min": 2.0
   }
 }

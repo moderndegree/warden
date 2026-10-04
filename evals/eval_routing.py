@@ -3,6 +3,7 @@
   python3 evals/eval_routing.py tune [--misses 20]     # tune split: shows misses
   python3 evals/eval_routing.py test                   # held-out: numbers only
   python3 evals/eval_routing.py tune --pace 200        # ms between items, to leave lev free for Sully
+  python3 evals/eval_routing.py tune --drafts          # Claude's drafted labels instead of yours (preliminary)
 
 Items: evals/routing/seed.jsonl (fixed split) plus prompts labelled live on the Router page (split by hash).
 lev answers are cached in evals/cache.sqlite (keyed by frame + question), so re-runs cost no calls unless a
@@ -26,8 +27,10 @@ EVALS = Path(__file__).resolve().parent
 TIERS = labels.TIERS
 
 
-def items(split):
+def items(split, drafts=False):
     """Labelled items of a split: [{id, text, area, split, gold: {workflow, tier, unsure}}]."""
+    if drafts:
+        return [{**s, "gold": s["draft"], "note": ""} for s in labels.seeds("routing") if s["split"] == split]
     lab = labels.latest("routing")
     seed = {x["id"]: x for x in labels.seeds("routing")}
     out = []
@@ -39,10 +42,7 @@ def items(split):
 
 
 def tier_of(r):
-    rt = r["routing"]
-    if rt["decision"] == "blocked":
-        return "blocked"
-    return {"local": "local", "subscription": "frontier", "free": "frontier"}.get(rt["route"], "unavailable")
+    return r["routing"].get("tier") or "unavailable"
 
 
 def predict(rows, lev, m, g, pace=0):
@@ -78,9 +78,9 @@ def confusion(rows, get_gold, get_pred, keys):
     return "\n".join(lines)
 
 
-def report(rows, split):
+def report(rows, split, src="your labels"):
     n = len(rows)
-    print(f"[{split}] routing · n={n} labelled ({sum(x['gold']['unsure'] for x in rows)} marked unsure)")
+    print(f"[{split}] routing · n={n} · {src} ({sum(x['gold']['unsure'] for x in rows)} marked unsure)")
     if not n:
         print("  no labels in this split yet: label in the test bed (Labels → routing)")
         return
@@ -125,11 +125,12 @@ def main():
     ap.add_argument("--misses", type=int, default=0, help="print up to N wrong items (tune only)")
     ap.add_argument("--pace", type=int, default=0, help="ms to wait after each item that called lev")
     ap.add_argument("--json", help="write per-item predictions to this file")
+    ap.add_argument("--drafts", action="store_true", help="use Claude's drafted labels (preliminary, not yours)")
     a = ap.parse_args()
     m, g = config.load("router.json"), config.load("guard.json")
     lev = CachedLev(g["decision_model"], EVALS / "cache.sqlite")
-    rows = predict(items(a.split), lev, m, g, a.pace)
-    report(rows, a.split)
+    rows = predict(items(a.split, a.drafts), lev, m, g, a.pace)
+    report(rows, a.split, "Claude's DRAFT labels (not confirmed by you)" if a.drafts else "your labels")
     print(f"  lev cache: {lev.hits} hits, {lev.misses} new calls")
     if a.json:
         Path(a.json).write_text(json.dumps(rows, indent=1))

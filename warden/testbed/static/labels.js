@@ -79,7 +79,8 @@ function show() {
   const it = S.order[S.pos];
   S.current = it.id;
   const prev = S.data.labels[it.id];
-  S.draft = prev ? { ...prev.label } : typeof it.draft === "boolean" ? { escalate: it.draft } : {};
+  const draft = typeof it.draft === "boolean" ? { escalate: it.draft } : it.draft ? { ...it.draft } : null;
+  S.draft = prev ? { ...prev.label } : draft || {};
   $("item-id").textContent = it.id;
   $("item-area").textContent = it.area || "";
   $("item-pos").textContent = `${S.pos + 1} of ${S.order.length}${prev ? " · labelled " + summary(S.kind, prev.label)

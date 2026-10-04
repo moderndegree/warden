@@ -1,4 +1,4 @@
-"""EXPERIMENTAL routing logic: agent selection and model fit within the chosen agent."""
+"""EXPERIMENTAL routing logic: workflow (agent) selection, the coarse tier, and model fit within the tier."""
 from .availability import missing
 
 
@@ -17,6 +17,26 @@ def score_question(m, key):
     return {key: {"type": "score", "instructions": d["instructions"], "criteria": d["levels"]}}
 
 
+def rules_local(sec):
+    """Rule findings that keep text on this machine whatever else is decided."""
+    out = []
+    if sec["secrets"]:
+        out.append("secrets/credentials detected")
+    if sec["pii"]:
+        out.append("high-risk personal data (SSN, card, IBAN)")
+    return out
+
+
+def choose_tier(m, complexity, sensitivity=None):
+    """Coarse tier from the complexity score (and sensitivity, when asked) → (tier, reasons)."""
+    cmin, fl = m["tier"]["complexity_min"], m["sensitivity"]["force_local"]
+    if complexity < cmin:
+        return "local", [f"Complexity {complexity:.2f} < {cmin}: local."]
+    if sensitivity is not None and sensitivity >= fl:
+        return "local", [f"Complexity {complexity:.2f} ≥ {cmin}, but sensitivity {sensitivity:.1f} ≥ {fl}: keep local."]
+    return "frontier", [f"Complexity {complexity:.2f} ≥ {cmin}: frontier."]
+
+
 def choose_agent(m, expert, mode):
     for aid, a in m["agents"].items():
         if expert in a["experts"] and mode in a["modes"]:
@@ -28,17 +48,16 @@ def agent_axis(m, agent_id, expert):
     return m["agents"][agent_id].get("axis") or m["experts"][expert]["axis"]
 
 
-def score_executors(m, agent_id, axis, complexity, sec, sensitivity=None, status=None):
-    """Fit every executor of the agent. complexity None = not asked (single-executor agent).
-    sensitivity None = not asked (only asked when the best pick would leave this machine).
-    status = availability.check() result; None = assume everything is up."""
+def score_executors(m, agent_id, axis, complexity, sec, sensitivity=None, status=None, tier=None):
+    """Fit every executor of the agent. complexity None = not asked. sensitivity None = not asked (only asked
+    before anything would leave this machine). status = availability.check() result; None = all up.
+    tier = the coarse tier; executors outside it rank after those inside (fallback only). A frontier executor
+    must beat the agent's best local executor on the axis to count as frontier."""
     r, sm = m["routing"], m["sensitivity"]
     need = 1 + (complexity if complexity is not None else 0)
-    force_local = []
-    if sec["secrets"]:
-        force_local.append("secrets/credentials detected")
-    if sec["pii"]:
-        force_local.append("high-risk personal data (SSN, card, IBAN)")
+    force_local = rules_local(sec)
+    local_cap = max([m["models"][e["model"]]["caps"].get(axis, 0) for e in m["agents"][agent_id]["executors"]
+                     if m["models"][e["model"]]["route"] == "local"] or [0])
     if sensitivity is not None and sensitivity >= sm["force_local"]:
         force_local.append(f"sensitivity {sensitivity:.1f} ≥ {sm['force_local']}")
     public_block = []
@@ -66,6 +85,9 @@ def score_executors(m, agent_id, axis, complexity, sec, sensitivity=None, status
         down = missing(m, ex, status) if status else []
         if down:
             notes.append("unavailable: " + "; ".join(down))
+        in_tier = tier is None or (mod["route"] == "local" if tier == "local" else mod["route"] != "local" and cap > local_cap)
+        if tier == "frontier" and mod["route"] != "local" and not in_tier:
+            notes.append(f"no better than local on {axis}")
         if gap > 0:
             notes.append(f"under by {gap:.1f}")
         elif surplus >= 2:
@@ -73,15 +95,17 @@ def score_executors(m, agent_id, axis, complexity, sec, sensitivity=None, status
         rows.append({"id": ex["model"], "label": mod["label"], "via": ex["via"], "provider": mod.get("provider", ""),
                      "route": mod["route"], "privacy": mod.get("privacy", ""), "axis": axis, "cap": cap,
                      "need": round(need, 2), "gap": round(gap, 2), "cost": mod["cost"], "fit": round(fit, 2),
-                     "allowed": allowed, "available": not down, "eligible": allowed and not down, "notes": notes})
-    ranked = sorted(rows, key=lambda x: (not x["eligible"], -x["fit"]))
+                     "allowed": allowed, "available": not down, "eligible": allowed and not down, "in_tier": in_tier,
+                     "notes": notes})
+    ranked = sorted(rows, key=lambda x: (not x["eligible"], not x["in_tier"], -x["fit"]))
     return rows, ranked, force_local
 
 
-def decide_route(m, agent_id, ranked, force_local, sec, asked):
-    """Final routing decision + human-readable reasons."""
+def decide_route(m, agent_id, ranked, force_local, sec, asked, tier=None, tier_why=()):
+    """Final routing decision + human-readable reasons. "tier" is where it actually goes (local / frontier),
+    "planned_tier" what the classification asked for; they differ only on an availability fallback."""
     agent = m["agents"][agent_id]
-    reasons = []
+    reasons = list(tier_why)
     if force_local:
         reasons.append("Keep local: " + ", ".join(force_local) + ".")
     best = ranked[0] if ranked and ranked[0]["eligible"] else None
@@ -97,16 +121,19 @@ def decide_route(m, agent_id, ranked, force_local, sec, asked):
         return {"decision": "no eligible model", "agent": agent_id, "agent_label": agent["label"], "model": None,
                 "route": None, "reasons": reasons + ["No executor in this agent satisfies the constraints."]}
     for x in ranked:
-        if x["allowed"] and not x["available"] and x["fit"] > best["fit"]:
+        if x["allowed"] and not x["available"] and (x["in_tier"] and not best["in_tier"]
+                                                    or x["in_tier"] == best["in_tier"] and x["fit"] > best["fit"]):
             reasons.append(f"Fell back from {x['label']}: {'; '.join(n for n in x['notes'] if n.startswith('unavailable'))}.")
+    if tier and not best["in_tier"]:
+        reasons.append(f"No {tier} option available; using {best['label']} ({best['route']}).")
     tied = [x["label"] for x in ranked[1:] if x["eligible"] and abs(x["fit"] - best["fit"]) < 0.05]
     if tied:
         reasons.append(f"Tied with {', '.join(tied)} (fit {best['fit']}); picked by agent order. "
-                       "Set a model's \"bonus\" in matrix.json to prefer one.")
-    if "complexity" in asked:
+                       "Set a model's \"bonus\" in router.json to prefer one.")
+    if "complexity" in asked and best["route"] != "local":
         reasons.append(f"Needs level {best['need']:.1f}/5 on '{best['axis']}'; {best['label']} has {best['cap']}"
                        + (f" (short by {best['gap']})" if best["gap"] else "") + ".")
-    if best["route"] != "local":
+    if best["route"] != "local" and not tier:          # with a tier, the tier reason already says why not local
         local = next((x for x in ranked if x["route"] == "local"), None)
         if local:
             reasons.append(f"Local option ({local['label']}) scores {local['fit']} vs {best['fit']}"
@@ -115,5 +142,7 @@ def decide_route(m, agent_id, ranked, force_local, sec, asked):
         reasons.append("Free router: quality varies per request and the provider may log prompts.")
     if sec["status"] == "review":
         reasons.append("Security verdict is REVIEW: confirm before sending, and run without tools/auto-approve.")
-    return {"decision": best["route"], "agent": agent_id, "agent_label": agent["label"], "model": best["id"],
-            "model_label": best["label"], "via": best["via"], "route": best["route"], "reasons": reasons}
+    return {"decision": best["route"], "tier": "local" if best["route"] == "local" else "frontier",
+            "planned_tier": tier, "workflow": agent_id, "agent": agent_id, "agent_label": agent["label"],
+            "model": best["id"], "model_label": best["label"], "via": best["via"], "route": best["route"],
+            "reasons": reasons}
