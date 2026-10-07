@@ -389,7 +389,17 @@ EXFIL_HOSTS = re.compile(     # no leading [\w.-]*: that made the scan quadratic
     r"(?<![\w-])(webhook\.site|requestbin|pipedream\.net|ngrok(-free)?\.(io|app|dev)|burpcollaborator\.net|"
     r"oast\.(fun|me|pro|live|site)|interact\.sh|canarytokens|beeceptor|hookbin|postb\.in|"
     r"pastebin\.com|transfer\.sh|0x0\.st|discord(app)?\.com/api/webhooks|hooks\.slack\.com|trycloudflare\.com)\b", _I)
-MD_IMAGE_EXFIL = re.compile(r"!\[[^\]\n]{0,500}\]\(\s{0,5}https?://[^)\s?]{1,500}\?[^)\s]{0,1000}=[^)\s]{0,1000}\)", _I)
+MD_IMAGE_EXFIL = re.compile(r"!\[[^\]\n]{0,500}\]\(\s{0,5}https?://[^)\s?]{1,500}\?([^)\s]{0,1000}=[^)\s]{0,1000})\)", _I)
+# A query string that carries data rather than CDN/resize parameters (web pages converted to markdown
+# are full of `![x](https://cdn/img.png?w=640&q=75)`, which blocked every page before 2026-10-04).
+MD_IMAGE_TEMPLATE = re.compile(r"\{\{?[^{}\s]{1,60}\}\}?|\$\{?[A-Za-z_][A-Za-z0-9_]{1,40}|%7B|<[A-Za-z_][^<>\s]{0,40}>|"
+                               r"\[[A-Z_]{3,40}\]", _I)
+MD_IMAGE_DATA = re.compile(r"(?:^|[&?;])(?:[\w-]{0,20}[_-])?(secret|token|key|apikey|api_key|passw(or)?d|pwd|creds?|credential|"
+                           r"conversation|convo|chat|history|transcript|prompt|system|instructions?|memory|context|"
+                           r"exfil|leak|dump|payload|ssh|env|cookie|session)s?=|"
+                           r"=(?:[^&;]{0,40}\b)?(secret|password|token|api[_-]?key|system[_ -]?prompt|conversation|"
+                           r"ssh[_-]?rsa|BEGIN [A-Z ]{0,20}KEY)", _I)
+MAX_MD_IMAGES = 200
 EXFIL_VERB = re.compile(
     r"\b(send|post|upload|forward|email|exfiltrate|transmit|leak|append)\b[^.\n]{0,60}\b(to|at|into)\b[^.\n]{0,20}(https?://|\b[\w.-]+@[\w-]+\.[a-z]{2,}|\bwebhook\b)", _I)
 URL = re.compile(r"\b(?:https?|ftp|file|data|javascript)://[^\s<>\"')\]]+|\b(?:javascript|data):[^\s<>\"')\]]+", _I)
@@ -410,10 +420,23 @@ def scan_commands(text, label=""):
 
 def scan_exfil(text):
     out = []
-    m = MD_IMAGE_EXFIL.search(text)
-    if m:
-        out.append(_finding("exfil.markdown_image", "exfiltration", "high", "Markdown image with query parameters",
-                            "Rendering this image would send data to a remote server with no click needed.", m.group(0)))
+    plain = None
+    for i, m in enumerate(MD_IMAGE_EXFIL.finditer(text)):
+        if i >= MAX_MD_IMAGES:
+            break
+        query = unquote(m.group(1).replace("+", " "))
+        if MD_IMAGE_TEMPLATE.search(query) or MD_IMAGE_DATA.search(query):
+            out.append(_finding("exfil.markdown_image", "exfiltration", "high",
+                                "Markdown image whose query string carries data",
+                                "Rendering this image would send data to a remote server with no click needed.",
+                                m.group(0)))
+            plain = None
+            break
+        plain = plain or m
+    if plain:
+        out.append(_finding("exfil.markdown_image_plain", "exfiltration", "low", "Markdown image with query parameters",
+                            "Ordinary on converted web pages; only risky if an agent writes one with data in it.",
+                            plain.group(0)))
     m = EXFIL_HOSTS.search(text)
     if m:
         out.append(_finding("exfil.capture_host", "exfiltration", "high", "Known data-capture / tunnel host",
