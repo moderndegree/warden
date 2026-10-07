@@ -10,7 +10,7 @@
   warden eval     [--sets dev,feedback,gandalf,jailbreak,neuralchemy,pairs,safeguard,ipi,web] [--no-lev]
   warden health   [--brief]
   warden exporter [--host 127.0.0.1] [--port 9740]
-  warden testbed  [--port 8740]
+  warden testbed  [--host 0.0.0.0] [--port 8740]
 
 Exit codes (scan): 0 allow · 3 review · 4 block · 1 error · 2 usage. (redact): 0 nothing removed · 3 redacted.
 (classify): 0 classified · 4 stopped by --guard · 1 lev unavailable. (escalate): 0 stay local · 3 escalate · 1 error.
@@ -223,8 +223,8 @@ def main(argv=None):
     p.add_argument("--port", type=int, default=9740)
     p.set_defaults(fn=cmd_exporter)
 
-    p = sub.add_parser("testbed", help="run the local test bed UI")
-    p.add_argument("--host", default="127.0.0.1")
+    p = sub.add_parser("testbed", help="run the test bed UI")
+    p.add_argument("--host", default="0.0.0.0", help="127.0.0.1 or 0.0.0.0 (no authentication)")
     p.add_argument("--port", type=int, default=8740)
     p.set_defaults(fn=cmd_testbed)
 

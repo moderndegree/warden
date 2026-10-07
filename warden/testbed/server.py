@@ -1,6 +1,6 @@
 """warden test bed: local UI + JSON API for the guard, classify, decide, and the experimental router.
 
-  warden testbed [--port 8740]        (or: python -m warden testbed)
+  warden testbed [--host 0.0.0.0] [--port 8740]        (or: python -m warden testbed)
 
 Inspects and classifies only; nothing is executed or forwarded.
 """
@@ -65,8 +65,12 @@ class Handler(BaseHTTPRequestHandler):
             pass        # the page navigated away mid-walk
 
     def _host_ok(self):
-        # DNS-rebinding guard: only answer requests addressed to this machine by a loopback name.
-        return (self.headers.get("Host") or "").rsplit(":", 1)[0].strip("[]") in LOOPBACK
+        # DNS-rebinding guard. Loopback binds only answer loopback names. A 0.0.0.0 bind answers
+        # any Host, because desktop and ser5 reach this machine by its name or address.
+        host = (self.headers.get("Host") or "").rsplit(":", 1)[0].strip("[]")
+        if self.server.server_address[0] in ("0.0.0.0", "::"):
+            return bool(host)
+        return host in LOOPBACK
 
     def _origin_ok(self):
         # CSRF guard: browsers send Origin on cross-site POSTs; accept only our own.
@@ -180,9 +184,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(400, {"error": str(e)})
 
 
-def serve(host="127.0.0.1", port=8740):
-    if host not in LOOPBACK:
-        raise SystemExit("refusing to bind a non-loopback address: the test bed has no authentication")
+def serve(host="0.0.0.0", port=8740):
+    if host not in (*LOOPBACK, "0.0.0.0"):
+        raise SystemExit("refusing to bind that address: the test bed has no authentication. Use 127.0.0.1 or 0.0.0.0.")
     srv = ThreadingHTTPServer((host, port), Handler)
     print(f"warden test bed on http://{host}:{port}  (config: {config.config_dir()})")
     try:

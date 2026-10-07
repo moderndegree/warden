@@ -14,7 +14,7 @@ A local guard and decision engine for AI agents, built on the small local decisi
 > installed. Hooks for Hermes and OpenCode come later, once the eval numbers justify it.
 
 ```bash
-python3 -m warden testbed                 # UI at http://127.0.0.1:8740   (or ./run.sh)
+python3 -m warden testbed                 # UI on 0.0.0.0:8740   (or ./run.sh)
 echo "…" | python3 -m warden scan -b content --brief
 python3 -m unittest discover -s tests -t .     # offline (lev stubbed)
 python3 evals/fetch.py && python3 -m warden eval    # measure on the test splits
@@ -362,7 +362,7 @@ scrape_configs:
   prediction is never shown there, so it can't anchor the label, and labelling makes no lev calls.
 
 Hardening:
-- Loopback-only, with a Host allowlist against DNS rebinding.
+- Binds `0.0.0.0:8740` by default (no authentication). `--host 127.0.0.1` keeps the loopback Host allowlist against DNS rebinding.
 - Origin check plus a required JSON content type against CSRF.
 - Strict CSP; 512 KiB body cap.
 - Rendering only through `textContent`.
