@@ -8,6 +8,7 @@ lev is asked the configured question for every item (even where the rules would 
 replayed offline: lev only, rules only, and the shipped combination. Answers are cached in evals/cache.sqlite.
 """
 import os
+os.environ.setdefault("WARDEN_TELEMETRY", "0")              # eval runs are not traffic
 os.environ.setdefault("WARDEN_FRAME_KEY", "warden-evals")
 import argparse
 import sys

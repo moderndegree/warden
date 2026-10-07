@@ -3,10 +3,12 @@
   python3 evals/eval_router.py          # from the repo root; needs lev on :8200
 """
 import json
+import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+os.environ.setdefault("WARDEN_TELEMETRY", "0")              # eval runs are not traffic
 from warden.router import route  # noqa: E402
 
 samples = [s for s in json.loads((Path(__file__).parent / "samples.json").read_text()) if s["boundary"] == "prompt"]

@@ -10,6 +10,7 @@ lev answers are cached in evals/cache.sqlite (keyed by frame + question), so re-
 question changes. Reports agent (workflow) accuracy, tier accuracy (local / frontier / blocked) and baselines.
 """
 import os
+os.environ.setdefault("WARDEN_TELEMETRY", "0")              # eval runs are not traffic
 os.environ.setdefault("WARDEN_FRAME_KEY", "warden-evals")      # stable frames so lev answers can be cached
 import argparse
 import json

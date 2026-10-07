@@ -8,6 +8,7 @@ the verdict policy offline so thresholds and rule changes can be compared instan
 The lev cache key is (frame text + question), so changing the question or framing re-asks lev automatically.
 """
 import os
+os.environ.setdefault("WARDEN_TELEMETRY", "0")              # eval runs are not traffic
 os.environ.setdefault("WARDEN_FRAME_KEY", "warden-evals")      # stable frames so lev answers can be cached
 import argparse
 import hashlib

@@ -9,10 +9,14 @@
   warden route    [TEXT | -f FILE | stdin]            (experimental)
   warden eval     [--sets dev,feedback,gandalf,jailbreak,neuralchemy,pairs,safeguard,ipi,web] [--no-lev]
   warden health   [--brief]
+  warden exporter [--host 127.0.0.1] [--port 9740]
   warden testbed  [--port 8740]
 
 Exit codes (scan): 0 allow · 3 review · 4 block · 1 error · 2 usage. (redact): 0 nothing removed · 3 redacted.
 (classify): 0 classified · 4 stopped by --guard · 1 lev unavailable. (escalate): 0 stay local · 3 escalate · 1 error.
+(health): 0 ok · 3 degraded (lev down or events log unwritable) · 1 down.
+
+Every guard / decide / classify / escalate call appends an event (no text) to ~/.local/state/warden/events.jsonl.
 """
 import argparse
 import json
@@ -113,6 +117,8 @@ def cmd_route(args):
 
 
 def cmd_eval(args):
+    import os
+    os.environ.setdefault("WARDEN_TELEMETRY", "0")     # eval runs aren't traffic
     from .evaluate import evaluate, summary
     def progress(name, i, n):
         if sys.stderr.isatty():
@@ -125,18 +131,26 @@ def cmd_eval(args):
 
 
 def cmd_health(args):
-    from . import availability, config
-    from .lev import Lev
-    cfg = config.load("guard.json")
-    up = Lev(cfg["decision_model"]).health()
-    status = availability.check(force=True)
+    from . import availability, health
+    h = health.check()
+    try:
+        status = availability.check(force=True)
+    except (OSError, ValueError) as e:
+        status = {"router.json": {"up": False, "why": str(e), "label": "router.json"}}
     if args.brief:
-        print(f"lev {'up' if up else 'DOWN'} · " + " · ".join(f"{k} {'ok' if v['up'] else 'DOWN (' + v['why'] + ')'}"
-                                                         for k, v in status.items() if k != "lev"))
+        checks = " · ".join(f"{k} {'ok' if c['ok'] else 'FAIL (' + c['detail'] + ')'}" for k, c in h["checks"].items())
+        routes = " · ".join(f"{k} {'ok' if v['up'] else 'DOWN (' + v['why'] + ')'}"
+                            for k, v in status.items() if k != "lev")
+        print(f"{h['status']} · {checks}" + (f"\nroutes: {routes}" if routes else ""))
     else:
-        _out({"warden": __version__, "config_dir": str(config.config_dir()), "lev": cfg["decision_model"]["url"],
-              "lev_up": up, "availability": status})
-    return 0 if up else 1
+        _out({**h, "lev_up": h["checks"]["lev"]["ok"], "availability": status})
+    return {"ok": 0, "degraded": 3}.get(h["status"], 1)
+
+
+def cmd_exporter(args):
+    from .exporter import serve
+    serve(args.host, args.port)
+    return 0
 
 
 def cmd_testbed(args):
@@ -200,9 +214,14 @@ def main(argv=None):
     p.add_argument("--no-lev", action="store_true", help="rules only, as a baseline")
     p.set_defaults(fn=cmd_eval)
 
-    p = sub.add_parser("health", help="check config, lev, and what routes can use (local checks only)")
+    p = sub.add_parser("health", help="ok / degraded / down: config, rules, lev, events log; exit 0 / 3 / 1")
     p.add_argument("--brief", action="store_true", help="one-line summary instead of JSON")
     p.set_defaults(fn=cmd_health)
+
+    p = sub.add_parser("exporter", help="serve /metrics (Prometheus) and /healthz for monitoring")
+    p.add_argument("--host", default="127.0.0.1", help="bind address (loopback or a private/tailnet address)")
+    p.add_argument("--port", type=int, default=9740)
+    p.set_defaults(fn=cmd_exporter)
 
     p = sub.add_parser("testbed", help="run the local test bed UI")
     p.add_argument("--host", default="127.0.0.1")
@@ -210,6 +229,8 @@ def main(argv=None):
     p.set_defaults(fn=cmd_testbed)
 
     args = ap.parse_args(argv)
+    from . import telemetry
+    telemetry.set_source("testbed" if args.cmd == "testbed" else "cli")
     # Text under inspection can hold lone surrogates or other unencodable characters; never crash on output.
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):

@@ -11,7 +11,7 @@ import threading
 import time
 from collections import OrderedDict
 
-from . import __version__, config, rules
+from . import __version__, config, rules, telemetry
 from .lev import Lev, DecisionError, chunks, frame
 
 BOUNDARIES = ("prompt", "content", "outbound")
@@ -93,6 +93,8 @@ def guard_events(text, boundary="prompt", cfg=None, lev=None, use_lev=True, alwa
         res["stopped_at"] = stopped
         res["findings"] = sorted(findings, key=lambda f: -rules.SEV_RANK[f["severity"]])
         res["ms"] = round(now(), 1)
+        if not always_lev:                             # analysis runs aren't traffic
+            telemetry.guard_event(res, len(text))
         return [{"type": "verdict", "status": res["verdict"], "categories": sec["categories"], "secrets": sec["secrets"],
                  "pii": sec["pii"], "score": res["score"], "action": res["action"], "t": now()},
                 {"type": "result", "result": res, "t": now()}]
@@ -211,14 +213,18 @@ def guard_events(text, boundary="prompt", cfg=None, lev=None, use_lev=True, alwa
 def inspect(text, boundary="prompt", cfg=None, lev=None, use_lev=True, always_lev=False):
     """Run the guard and return the result. Identical calls (text, boundary, config) hit an in-process cache."""
     explicit = cfg is not None or lev is not None
-    key = None
+    key = hit = None
     if not explicit:
         key = (boundary, use_lev, hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest(),
                config.mtime("guard.json"))
         with _cache_lock:
-            if key in _cache:
+            hit = _cache.get(key)
+            if hit:
                 _cache.move_to_end(key)
-                return {**_cache[key], "cached": True}
+        if hit:
+            res = {**hit, "cached": True}
+            telemetry.guard_event(res, len(text), ms=0.0)
+            return res
     res = None
     for ev in guard_events(text, boundary, cfg, lev, use_lev, always_lev):
         if ev["type"] == "result":

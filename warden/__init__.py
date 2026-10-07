@@ -4,6 +4,10 @@
 """
 __version__ = "0.1.0"
 
+import logging as _logging
+
+_logging.getLogger("warden").addHandler(_logging.NullHandler())
+
 
 def inspect(text, boundary="prompt", **kw):
     from .guard import inspect as _inspect

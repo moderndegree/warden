@@ -9,6 +9,7 @@ ask only what you need, and keep `state` short.
 import hashlib
 import hmac
 import json
+import logging
 import os
 import secrets
 import threading
@@ -91,7 +92,12 @@ class Lev:
                 data = json.load(r)
         except (urllib.error.URLError, TimeoutError, ConnectionError, json.JSONDecodeError) as e:
             with Lev._lock:
+                tripped = time.monotonic() >= Lev._down_until
                 Lev._down_until = time.monotonic() + self.cooldown
+            if tripped:
+                from . import telemetry
+                telemetry.record("lev_down", logging.WARNING, url=self.url, error=f"{type(e).__name__}: {e}"[:300],
+                                 cooldown_s=self.cooldown)
             raise DecisionError(f"decision model unreachable at {self.url}: {e}") from e
         return data["answers"], round((time.monotonic() - t) * 1000), data.get("usage", {})
 

@@ -279,7 +279,8 @@ A route never points at something that can't run right now. Every check is local
 | `warden escalate -t TASK [TRIED \| -f FILE \| stdin] [--brief]` | Hand off to a frontier model? | 0 stay local · 3 escalate · 1 error |
 | `warden route` | Experimental router; prints JSON | |
 | `warden eval [--sets …] [--no-lev]` | Measure the guard | |
-| `warden health [--brief]` | Check the config, lev, and what routes can use | 0 lev up · 1 lev down |
+| `warden health [--brief]` | Health check (config, rules self-test, lev, events log) plus what routes can use | 0 ok · 3 degraded · 1 down |
+| `warden exporter [--host H] [--port 9740]` | Serve `/metrics` (Prometheus) and `/healthz` | |
 | `warden testbed` | Run the test bed UI | |
 
 **Why a CLI and a skill, not an MCP:**
@@ -287,6 +288,62 @@ A route never points at something that can't run right now. Every check is local
   in OpenCode and Hermes.
 - The same CLI serves future hooks through its exit codes.
 - An MCP wrapper over these same functions can be added if a harness without a shell needs it.
+
+## Logging and monitoring
+
+**Events log.** Every guard, decide, classify and escalate call appends one JSON line to
+`~/.local/state/warden/events.jsonl` (0600). That includes clean passes and cache hits, from every process
+that uses warden: the Hermes plugin, the CLI and the test bed all write to the same file.
+- **What's in an event:** `ts`, `op`, `source` (`hermes`, `cli`, `testbed`), `level`, the verdict and action,
+  categories, finding ids, the lev score, lev calls / ms / tokens, `chars`, `degraded`, `error`, `cached`, `ms`.
+- **What's never in it:** the text under inspection, decide questions and items, and escalation tasks.
+- **Circuit breaker:** when lev's circuit breaker trips, one `lev_down` event is written per trip.
+- **Rotation:** the file rotates at 10 MB and keeps 3 old files (`events.jsonl.1`…).
+- **Config:** `guard.json` → `"telemetry": {"enabled", "events_path", "max_bytes", "keep"}`.
+- **Environment:** `WARDEN_TELEMETRY=0` turns it off (tests and evals set this), `WARDEN_EVENTS_PATH` moves it,
+  and `WARDEN_SOURCE` or `telemetry.set_source()` labels a caller.
+- **Python logging:** each event also goes to the `warden` logger, at INFO or at WARNING when degraded. The
+  library only adds a `NullHandler`, so the host app decides whether these appear.
+
+Point a log shipper (Alloy, Promtail, Vector) at the file to search it in Loki or Grafana.
+
+**Health.** `warden health` and `GET /healthz` report `ok`, `degraded` or `down`:
+
+| Check | Required | Fails when |
+|---|---|---|
+| `config` | yes | `guard.json` / `router.json` won't load |
+| `rules` | yes | a clean and an attack self-test prompt don't come out allow / not-allow (not recorded as traffic) |
+| `lev` | no | lev's loopback `/health` fails: warden runs rules only, and content fails closed to review |
+| `events_log` | no | the events file or its directory isn't writable |
+
+`down` means every call would fail, and `degraded` means warden still answers, but with less.
+
+**Metrics.** `warden exporter` (default `127.0.0.1:9740`) tails the events log and serves:
+- **`/metrics`:** in Prometheus text format.
+- **`/healthz`:** 200 when ok or degraded, 503 when down.
+
+Metric families:
+- `warden_calls_total{op,source,boundary,outcome}`, where outcome is the guard action, decide
+  complete/incomplete, the classify workflow, or escalate/stay_local.
+- `warden_degraded_total`, `warden_errors_total`, `warden_cached_total`.
+- `warden_categories_total{op,boundary,category}`.
+- `warden_call_duration_seconds` (histogram).
+- `warden_lev_calls_total`, `warden_lev_seconds_total`, `warden_lev_tokens_total`, `warden_lev_down_total`.
+- `warden_up`, `warden_health_status{status}`, `warden_health_check{check}`.
+- `warden_last_event_timestamp_seconds`, `warden_build_info`.
+
+Counters count the current log when the exporter starts, then stay monotonic while it runs. Labels never
+carry text or finding ids. A user unit is in `contrib/warden-exporter.service`.
+
+The exporter has no authentication, so bind loopback or a tailnet address, never a public one. Example scrape
+config for a Prometheus on another tailnet host:
+
+```yaml
+scrape_configs:
+  - job_name: warden
+    static_configs:
+      - targets: ["mini:9740"]      # exporter started with --host <mini's tailnet IP>
+```
 
 ## Config
 
@@ -314,12 +371,13 @@ Hardening:
 ## Layout
 
 ```
-warden/          rules.py · lev.py · guard.py · classify.py · escalate.py · availability.py · decide.py · labels.py · router.py (+ router_logic.py) · evaluate.py · feedback.py · cli.py
+warden/          rules.py · lev.py · guard.py · classify.py · escalate.py · availability.py · decide.py · labels.py · router.py (+ router_logic.py) · evaluate.py · feedback.py · telemetry.py · health.py · metrics.py · exporter.py · cli.py
+contrib/         warden-exporter.service (systemd user unit)
 warden/defaults/ guard.json · router.json
 warden/testbed/  server.py · static/
 skill/warden/    SKILL.md (not installed)
 evals/           samples.json (dev) · fetch.py · analyze.py (tuning workbench) · eval_router.py · eval_routing.py · eval_escalation.py · routing/, escalation/ (seed.jsonl) · data/, reports/, cache.sqlite (git-ignored)
-tests/           rules · guard · classify · escalate · availability · decide · router · labels · cli · testbed · perf (ReDoS) · fuzz (stubbed lev)
+tests/           rules · guard · classify · escalate · availability · decide · router · labels · cli · testbed · telemetry (events, metrics, health, exporter) · perf (ReDoS) · fuzz (stubbed lev)
 ```
 
 ## Known limits

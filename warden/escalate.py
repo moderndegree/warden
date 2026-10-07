@@ -7,10 +7,11 @@ One lev call (yes/no). Cheap rule signals in the summary then adjust it: clear s
 "needs a person" (permissions, no network, waiting on the user) keeps it local because a bigger model can't help.
 Config: router.json "escalation".
 """
+import logging
 import re
 import time
 
-from . import config, rules
+from . import config, rules, telemetry
 from .lev import Lev, DecisionError, frame
 
 
@@ -60,8 +61,11 @@ def escalate(task, tried, m=None, gcfg=None, lev=None):
         except DecisionError as e:
             error = str(e)
     esc, reasons = decide(p, signals, cfg)
-    return {"escalate": esc, "p": p, "signals": signals, "reasons": reasons, "error": error, "lev": st,
-            "ms": round((time.monotonic() - t0) * 1000, 1)}
+    res = {"escalate": esc, "p": p, "signals": signals, "reasons": reasons, "error": error, "lev": st,
+           "ms": round((time.monotonic() - t0) * 1000, 1)}
+    telemetry.record("escalate", logging.WARNING if error else logging.INFO, escalate=esc, p=p,
+                     signals=sorted(signals), degraded=error is not None, error=error, lev=st, ms=res["ms"])
+    return res
 
 
 def brief(r):

@@ -7,6 +7,7 @@ Per item it collects (through the cached lev): the guard verdict and rule flags,
 sensitivity, and each candidate "needs a frontier model?" question, then replays policies offline.
 """
 import os
+os.environ.setdefault("WARDEN_TELEMETRY", "0")              # eval runs are not traffic
 os.environ.setdefault("WARDEN_FRAME_KEY", "warden-evals")
 import argparse
 import sys

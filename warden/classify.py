@@ -7,9 +7,10 @@
 Also reports the workflow the expert + mode map to (router.json "agents"; no extra call). Secrets and
 high-risk PII are redacted before lev sees the text.
 """
+import logging
 import time
 
-from . import config, rules
+from . import config, rules, telemetry
 from .lev import Lev, DecisionError, frame
 from .router_logic import choose_agent, routing_questions, score_question
 
@@ -45,6 +46,12 @@ def classify(text, sensitivity=False, guard=False, m=None, gcfg=None, lev=None):
     def done():
         res["lev"] = st
         res["ms"] = round((time.monotonic() - t0) * 1000, 1)
+        telemetry.record("classify", logging.WARNING if res["error"] else logging.INFO, chars=len(text),
+                         expert=(res["expert"] or {}).get("id"), mode=(res["mode"] or {}).get("id"),
+                         workflow=(res["workflow"] or {}).get("id"),
+                         sensitivity=(res["sensitivity"] or {}).get("score"),
+                         guard_verdict=(res["security"] or {}).get("verdict"), stopped=res["stopped"],
+                         degraded=res["error"] is not None, error=res["error"], lev=st, ms=res["ms"])
         return res
 
     if guard:

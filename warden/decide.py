@@ -7,9 +7,10 @@
 Each item is one lev call (~90 ms for short items), framed as data. Secrets and high-risk PII are redacted
 before lev sees an item. Good for triage, filtering and bucketing; not for final high-stakes calls.
 """
+import logging
 import time
 
-from . import config, rules
+from . import config, rules, telemetry
 from .lev import Lev, DecisionError, fit, frame
 
 KINDS = ("yes_no", "choice", "score")
@@ -64,6 +65,10 @@ def decide(question, kind="yes_no", items=(), options=None, levels=None, context
             break
         calls, lev_ms, tokens = calls + 1, lev_ms + ms, tokens + usage.get("input_tokens", 0)
         out.append({"index": i, **_answer(kind, a["q"], dc["yes_threshold"]), "truncated": truncated})
-    return {"question": question, "kind": kind, "results": out, "complete": error is None and len(out) == len(items),
-            "error": error, "lev": {"calls": calls, "ms": lev_ms, "tokens": tokens},
-            "ms": round((time.monotonic() - t0) * 1000, 1)}
+    res = {"question": question, "kind": kind, "results": out, "complete": error is None and len(out) == len(items),
+           "error": error, "lev": {"calls": calls, "ms": lev_ms, "tokens": tokens},
+           "ms": round((time.monotonic() - t0) * 1000, 1)}
+    telemetry.record("decide", logging.WARNING if error else logging.INFO, kind=kind, items=len(items),
+                     answered=len(out), complete=res["complete"], degraded=error is not None, error=error,
+                     lev=res["lev"], ms=res["ms"])
+    return res

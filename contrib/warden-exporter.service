@@ -1,0 +1,17 @@
+# systemd user unit for the warden exporter (/metrics + /healthz).
+#   cp contrib/warden-exporter.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now warden-exporter
+# To let a Prometheus on another tailnet host scrape it, bind the tailnet address instead of loopback
+# (e.g. --host 100.x.y.z). It serves counts and health only, but has no authentication: never bind a public address.
+[Unit]
+Description=warden exporter (Prometheus /metrics, /healthz)
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/Work/warden
+ExecStart=/usr/bin/python3 -m warden exporter --host 127.0.0.1 --port 9740
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

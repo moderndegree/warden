@@ -113,5 +113,11 @@
   "cache_size": 256,
   "chars_per_token": 3.5,
   "feedback_path": "~/.local/state/warden/feedback.jsonl",
+  "telemetry": {
+    "enabled": true,
+    "events_path": "~/.local/state/warden/events.jsonl",
+    "max_bytes": 10485760,
+    "keep": 3
+  },
   "_boundary_keys_comment": "questions: lev questions, first = primary (swept over windows of window_chars, max_windows sampled evenly; also asked of up to max_hidden hidden-markup segments); the rest asked once on the head+tail. on_lev_down: rules_only | review. long_text: above over_chars, lev's review threshold rises to medium (measured: long prompts 32% -> 14% false positives, detection 98% -> 97%)."
 }
