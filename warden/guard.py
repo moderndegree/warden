@@ -105,17 +105,25 @@ def guard_events(text, boundary="prompt", cfg=None, lev=None, use_lev=True, alwa
     # ---- Gate 0: rules ----------------------------------------------------------------------
     t_open = now()
     yield {"type": "gate", "gate": "rules", "t": now()}
-    for family, fs in rules.scan_steps(text, cfg["chars_per_token"]):
+    aux = {}
+    for family, fs in rules.scan_steps(text, cfg["chars_per_token"], aux=aux):
         if family not in b["rules"]:
             continue
         findings.extend(fs)
         yield {"type": "rules", "family": family, "findings": fs, "t": now()}
-    hidden = rules.decode_tag_chars(text)
+    # Reuse the scan's views when it saw the whole text; a truncated scan only covered head+tail.
+    if aux.get("capped"):
+        hidden = rules.decode_tag_chars(text)
+        markup = None
+        stripped = None
+        normed = None
+    else:
+        hidden, markup, stripped, normed = aux["hidden"], aux["markup"], aux["stripped"], aux["norm"]
     if hidden:
         res["hidden_text"] = hidden
         yield {"type": "hidden", "text": hidden, "t": now()}
     if b["redact"]:
-        red = rules.redact(rules.strip_invisible(text))
+        red = rules.redact(stripped if stripped is not None else rules.strip_invisible(text))
         res["redacted"] = red["text"]
         res["redactions"] = red["counts"]
     sec = verdict(findings)
@@ -133,7 +141,8 @@ def guard_events(text, boundary="prompt", cfg=None, lev=None, use_lev=True, alwa
     # ---- Gate 1: lev ------------------------------------------------------------------------
     # lev reads what a model would read: invisible chars stripped, NFKC, hidden tag text appended.
     # Secrets and high-risk PII are redacted first; they never leave the rules layer.
-    view = rules.redact(rules.normalize(text) + (f"\n[hidden text: {hidden}]" if hidden else ""))["text"]
+    base = normed if normed is not None else rules.normalize(text)
+    view = rules.redact(base + (f"\n[hidden text: {hidden}]" if hidden else ""))["text"]
     t_open, calls0 = now(), st["calls"]
     yield {"type": "gate", "gate": "security", "t": now()}
     qids = b["questions"]
@@ -169,7 +178,8 @@ def guard_events(text, boundary="prompt", cfg=None, lev=None, use_lev=True, alwa
                     break
         # 2. Hidden markup (comments, invisible elements, alt text) judged on its own: a person never sees it.
         if not hi(primary):
-            for kind, seg in rules.hidden_markup(text)[:b.get("max_hidden", 3)]:
+            segs = markup if markup is not None else rules.hidden_markup(text)
+            for kind, seg in segs[:b.get("max_hidden", 3)]:
                 seg = rules.redact(rules.normalize(seg))["text"]
                 yield {"type": "ask", "key": "security", "q": primary, "label": f"{cfg['questions'][primary]['label']} ({kind})", "t": now()}
                 a, ms = ask(frame(seg, window, b["frame"]), pq())

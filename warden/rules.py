@@ -30,6 +30,9 @@ ZERO_WIDTH = {0x200B, 0x200C, 0x200D, 0x2060, 0xFEFF, 0x180E, 0x00AD, 0x034F, 0x
 BIDI = set(range(0x202A, 0x202F)) | set(range(0x2066, 0x206A)) | {0x200E, 0x200F}
 TAG_RANGE = range(0xE0000, 0xE0080)        # "ASCII smuggling": invisible tag characters
 VARIATION_SUPP = range(0xE0100, 0xE01F0)   # variation selectors used to hide bytes
+_STRIP_INVISIBLE = str.maketrans({chr(c): None for c in (*ZERO_WIDTH, *BIDI, *TAG_RANGE, *VARIATION_SUPP)})
+_TAG_PRINTABLE = re.compile("[\U000E0020-\U000E007E]+")
+_HOMOGLYPH_SCRIPTS = {"CYRILLIC", "GREEK", "ARMENIAN", "CHEROKEE"}
 
 
 # Subdivision flag emoji (England, Scotland, Wales) are U+1F3F4 + tag letters/digits + U+E007F cancel tag.
@@ -38,16 +41,16 @@ FLAG_SEQ = re.compile("\U0001F3F4[\U000E0030-\U000E0039\U000E0061-\U000E007A]{1,
 
 def decode_tag_chars(text):
     """Invisible Unicode tag characters map 1:1 onto ASCII. Return the hidden message (legit flag emoji excluded)."""
-    text = FLAG_SEQ.sub("", text)
-    return "".join(chr(ord(c) - 0xE0000) for c in text
-                   if ord(c) in TAG_RANGE and 0x20 <= ord(c) - 0xE0000 < 0x7F)
+    if "\U0001F3F4" in text:
+        text = FLAG_SEQ.sub("", text)
+    parts = _TAG_PRINTABLE.findall(text)
+    return "".join(chr(ord(c) - 0xE0000) for p in parts for c in p)
 
 
 def strip_invisible(text):
-    text = FLAG_SEQ.sub("\U0001F3F4", text)
-    return "".join(c for c in text
-                   if ord(c) not in ZERO_WIDTH and ord(c) not in BIDI and ord(c) not in TAG_RANGE
-                   and ord(c) not in VARIATION_SUPP)
+    if "\U0001F3F4" in text:
+        text = FLAG_SEQ.sub("\U0001F3F4", text)
+    return text.translate(_STRIP_INVISIBLE)
 
 
 def unconfuse(text):
@@ -105,40 +108,65 @@ def deobfuscated_views(text):
 ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]{0,2000}(\x07|\x1b\\)")
 
 
-def scan_unicode(text):
+def _mixed_script_words(text):
+    """Latin mixed with lookalike letters from other scripts. ASCII text cannot be mixed-script."""
+    mixed = []
+    for word in re.findall(r"\w{3,}", text):
+        if word.isascii():
+            continue
+        scripts = set()
+        for c in word:
+            if not c.isalpha():
+                continue
+            if c.isascii():
+                scripts.add("LATIN")
+            else:
+                scripts.add(unicodedata.name(c, "").split(" ", 1)[0])
+        if "LATIN" in scripts and scripts & _HOMOGLYPH_SCRIPTS:
+            mixed.append(word)
+    return mixed
+
+
+def scan_unicode(text, hidden=None):
     out = []
-    zw = [c for c in text if ord(c) in ZERO_WIDTH]
+    if text.isascii():
+        zw, bidi, vs, ctrl = [], [], 0, [
+            c for c in text if (ord(c) < 32 and c not in "\t\n\r\x1b") or c == "\x7f"]
+        if hidden is None:
+            hidden = ""
+    else:
+        zw, bidi, ctrl, vs = [], [], [], 0
+        for c in text:
+            o = ord(c)
+            if o in ZERO_WIDTH:
+                zw.append(c)
+            elif o in BIDI:
+                bidi.append(c)
+            elif o in VARIATION_SUPP:
+                vs += 1
+            elif (o < 32 or 0x7F <= o <= 0x9F) and c not in "\t\n\r\x1b":
+                ctrl.append(c)
+        if hidden is None:
+            hidden = decode_tag_chars(text)
     if zw:
         out.append(_finding("unicode.zero_width", "obfuscation", "medium" if len(zw) > 3 else "low",
                             "Invisible zero-width characters",
                             f"{len(zw)} invisible character(s); often used to split trigger words past filters.",
                             " ".join(f"U+{ord(c):04X}" for c in zw[:8])))
-    bidi = [c for c in text if ord(c) in BIDI]
     if bidi:
         out.append(_finding("unicode.bidi", "obfuscation", "high",
                             "Bidirectional override characters",
                             "Text-direction controls can make text display differently from what a model reads (Trojan Source).",
                             " ".join(f"U+{ord(c):04X}" for c in bidi[:8])))
-    hidden = decode_tag_chars(text)
     if hidden:
         out.append(_finding("unicode.tag_smuggling", "prompt_injection", "critical",
                             "Hidden text in Unicode tag characters",
                             "Invisible tag characters encode a message a model can read but you can't see.", hidden))
-    vs = sum(1 for c in text if ord(c) in VARIATION_SUPP)
     if vs > 4:
         out.append(_finding("unicode.variation_selectors", "obfuscation", "high",
                             "Data hidden in variation selectors",
                             f"{vs} supplementary variation selectors; a known way to smuggle bytes inside an emoji."))
-    # Mixed-script words (Latin letters mixed with Cyrillic/Greek lookalikes) = homoglyph spoofing.
-    mixed = []
-    for word in re.findall(r"\w{3,}", text):
-        scripts = set()
-        for c in word:
-            if c.isalpha():
-                name = unicodedata.name(c, "")
-                scripts.add(name.split(" ")[0])
-        if "LATIN" in scripts and scripts & {"CYRILLIC", "GREEK", "ARMENIAN", "CHEROKEE"}:
-            mixed.append(word)
+    mixed = [] if text.isascii() else _mixed_script_words(text)
     if mixed:
         out.append(_finding("unicode.homoglyph", "obfuscation", "medium",
                             "Homoglyph (mixed-script) words",
@@ -148,7 +176,6 @@ def scan_unicode(text):
         out.append(_finding("unicode.ansi_escape", "obfuscation", "medium", "Terminal escape sequences",
                             "ANSI/OSC escapes can rewrite what a terminal shows, hide text, or plant links.",
                             repr(m.group(0))))
-    ctrl = [c for c in text if unicodedata.category(c) == "Cc" and c not in "\n\r\t\x1b"]
     if ctrl:
         out.append(_finding("unicode.control", "obfuscation", "low", "Control characters",
                             f"{len(ctrl)} non-printing control character(s) (escape sequences can spoof terminals and logs).",
@@ -630,24 +657,33 @@ def hidden_markup(text):
     return out
 
 
-def scan_steps(text, chars_per_token=3.5):
-    """Yield (family, findings) one rule family at a time, in RULE_FAMILIES order."""
+def scan_steps(text, chars_per_token=3.5, *, aux=None):
+    """Yield (family, findings) one rule family at a time, in RULE_FAMILIES order.
+
+    If `aux` is a dict, it is filled with hidden/markup/norm/stripped from this pass so callers
+    (guard, scan) can reuse them instead of walking the text again. `capped` is the original
+    length when the scan truncated, else None.
+    """
     capped = None
     if len(text) > MAX_SCAN_CHARS:
         capped = len(text)
         half = MAX_SCAN_CHARS // 2
         text = text[:half] + "\n" + text[-half:]
     hidden = decode_tag_chars(text)
-    norm = normalize(text)
+    stripped = strip_invisible(text)
+    nfkc = unicodedata.normalize("NFKC", stripped)
+    norm = re.sub(r"\s+", " ", unconfuse(nfkc))
     views = [("", text)]
     if norm != re.sub(r"\s+", " ", text):
         views.append((" (after removing invisible chars / NFKC)", norm))
     if hidden:
         views.append((" (in hidden tag text)", hidden))
-    views += deobfuscated_views(unicodedata.normalize("NFKC", strip_invisible(text)))
+    views += deobfuscated_views(nfkc)
     markup = hidden_markup(text)
     for kind, seg in markup:
         views.append((f" (in {kind})", seg))
+    if aux is not None:
+        aux.update(hidden=hidden, markup=markup, norm=norm, stripped=stripped, capped=capped)
 
     def across_views(fn):
         seen, out = set(), []
@@ -658,7 +694,7 @@ def scan_steps(text, chars_per_token=3.5):
                     out.append(f)
         return out
 
-    yield "unicode", scan_unicode(text)
+    yield "unicode", scan_unicode(text, hidden=hidden)
     inj = across_views(scan_injection)
     for kind, seg in markup:
         hits = [f for f in scan_injection(seg) + scan_injection(normalize(seg))
@@ -685,6 +721,7 @@ def scan_steps(text, chars_per_token=3.5):
 
 
 def scan(text, chars_per_token=3.5):
-    findings = [f for _, fs in scan_steps(text, chars_per_token) for f in fs]
+    aux = {}
+    findings = [f for _, fs in scan_steps(text, chars_per_token, aux=aux) for f in fs]
     findings.sort(key=lambda f: -SEV_RANK[f["severity"]])
-    return findings, normalize(text)
+    return findings, aux["norm"] if not aux.get("capped") else normalize(text)
