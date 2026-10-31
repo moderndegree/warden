@@ -12,7 +12,9 @@ import re
 import time
 
 from . import config, rules, telemetry
-from .lev import Lev, DecisionError, frame
+from . import backends
+from .backends import DecisionError
+from .framing import frame
 
 
 def _signals(tried, cfg):
@@ -49,7 +51,7 @@ def escalate(task, tried, m=None, gcfg=None, lev=None):
     m = m or config.load("router.json")
     gcfg = gcfg or config.load("guard.json")
     cfg = m["escalation"]
-    lev = lev or Lev(gcfg["decision_model"])
+    lev = lev or backends.make(gcfg["decision_model"])
     t0 = time.monotonic()
     signals = _signals(rules.normalize(tried), cfg)
     p, error, st = None, None, {"calls": 0, "ms": 0, "tokens": 0}

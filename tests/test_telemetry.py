@@ -15,7 +15,7 @@ from warden.decide import decide
 from warden.escalate import escalate
 from warden.exporter import make_handler
 from warden.guard import inspect
-from warden.lev import Lev
+from warden.backends.systemone import SystemOne as Lev
 from warden.metrics import Collector
 from tests.stubs import Down, StubLev
 

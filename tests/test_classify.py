@@ -69,7 +69,7 @@ class Classify(unittest.TestCase):
 class ClassifyCLI(unittest.TestCase):
     def cli(self, *argv, lev=None):
         out = io.StringIO()
-        with mock.patch("warden.classify.Lev", return_value=lev or StubLev(expert="home", mode="act")), redirect_stdout(out):
+        with mock.patch("warden.backends.make", return_value=lev or StubLev(expert="home", mode="act")), redirect_stdout(out):
             code = main(list(argv))
         return code, out.getvalue()
 

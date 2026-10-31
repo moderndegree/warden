@@ -29,7 +29,7 @@ class Testbed(TempLabels):
     def setUp(self):
         super().setUp()
         self.lev = StubLev(expert="home", mode="act")
-        p = mock.patch("warden.classify.Lev", return_value=self.lev)
+        p = mock.patch("warden.backends.make", return_value=self.lev)
         p.start()
         self.addCleanup(p.stop)
 

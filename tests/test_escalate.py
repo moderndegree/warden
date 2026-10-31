@@ -60,7 +60,7 @@ class Escalate(unittest.TestCase):
 class EscalateCLI(unittest.TestCase):
     def cli(self, *argv, lev):
         out = io.StringIO()
-        with mock.patch("warden.escalate.Lev", return_value=lev), redirect_stdout(out):
+        with mock.patch("warden.backends.make", return_value=lev), redirect_stdout(out):
             code = main(list(argv))
         return code, out.getvalue()
 

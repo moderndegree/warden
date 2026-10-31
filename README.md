@@ -1,7 +1,8 @@
 # warden
 
-A local guard and decision engine for AI agents, built on the small local decision model **lev**
-(`/v1/systemone` on `127.0.0.1:8200`). Standard library only, Python ≥ 3.11.
+A local guard and decision engine for AI agents. Bring any decision model: a small typed-decision model on
+`/v1/systemone` (such as **lev**, the default), any OpenAI-compatible API, or none at all
+([Decision backends](#decision-backends)). Standard library only, Python ≥ 3.11.
 
 - **Guard**: inspects text at a boundary and says what to do with it.
 - **Classify**: what expertise a prompt needs and what the user wants done (2 lev calls).
@@ -21,6 +22,37 @@ python3 evals/fetch.py && python3 -m warden eval    # measure on the test splits
 ```
 
 Install as a CLI when you're ready (not done yet): `uv tool install --editable ~/Work/warden`
+
+## Decision backends
+
+warden asks a model typed questions (yes/no, choice, score) and only ever gets back probabilities. Set
+`decision_model.backend` in `guard.json`:
+
+| backend | for | config |
+|---|---|---|
+| `systemone` (default) | a `/v1/systemone` endpoint, e.g. lev on llama.cpp: about 100 ms per question, all questions in one call | `url`, `model` |
+| `openai_compat` | Ollama, vLLM, LM Studio, llama.cpp server, OpenRouter, OpenAI…: one single-token chat call per question, probabilities from logprobs (or a stated confidence if the server has no logprobs) | `url` (…/v1), `model`, `api_key_env`, `extra_body` (e.g. turn thinking off) |
+| `rules_only` | no model: the rules alone, with model questions handled as if the model were down (prompt → rules only, content → review, decide → incomplete) | none |
+| `module:Class` | your own: a class with `ask(state, questions) -> (answers, ms, usage)` and `health()` | anything |
+
+Every backend gets the same keyed data framing (`warden/framing.py`) and circuit breaker.
+
+**Calibrate when you switch.** The thresholds in `guard.json` were tuned on lev. Measure your backend on the
+same splits and adjust `thresholds` if needed:
+
+```bash
+python3 evals/analyze.py test --per-set 30 --decision-model '{"backend": "openai_compat", "url": "http://127.0.0.1:11434/v1", "model": "qwen3:4b", "extra_body": {"think": false}}'
+```
+
+Sample (test split, 30 per set, lev's thresholds, 2026-10-31):
+
+| backend · model | prompt detect / FP | content detect / FP |
+|---|---|---|
+| systemone · lev (Qwen-based, Q4, ~110 ms/question) | 94% / 9.7% | 90% / 0% |
+| openai_compat · Qwen3.8-Flash, thinking off (~550 ms/question) | 92% / 16.1% | 100% / 0% |
+
+The bigger general model catches about as much but flags more benign prompts at lev's thresholds. Raise
+`thresholds.medium` for it, or use it for content only.
 
 ## Boundaries
 
