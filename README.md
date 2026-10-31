@@ -164,8 +164,9 @@ warden route "Plan a zero-downtime move from Docker Compose to Podman quadlets" 
 **The convention is workflow × tier.** warden answers with that pair and consumers map it to a concrete harness.
 The default `router.json` maps it to this machine's harnesses: each agent's local executor for `local`, and its
 cloud executors for `frontier`.
-- **Workflow:** one of `router.json`'s agents: `voice_home`, `code_build`, `code_plan`, `research` or
-  `assistant`. Quick technical answers (`tech_qa`) were folded into `code_build` on 2026-10-04.
+- **Workflow:** one of `router.json`'s agents: `voice_home` (Sully does it), `iris` (Sully → Iris),
+  `code_build`, `code_plan`, `research` (Sully → Scout) or `assistant` (Sully desk). Quick technical
+  answers (`tech_qa`) were folded into `code_build` on 2026-10-04.
 - **Tier:** `local`, `frontier` or `blocked`.
 
 **How the decision is made:**

@@ -56,7 +56,9 @@ class Router(unittest.TestCase):
 
     def test_agent_from_expert_and_mode(self):
         cases = [("software", "make", "code_build"), ("software", "plan", "code_plan"), ("devops", "answer", "code_build"),
-                 ("research", "lookup", "research"), ("home", "act", "voice_home"), ("writing", "make", "assistant")]
+                 ("research", "lookup", "research"), ("home", "act", "voice_home"), ("writing", "make", "assistant"),
+                 ("design", "make", "iris"), ("design", "plan", "iris"), ("design", "act", "code_build"),
+                 ("design", "lookup", "research")]
         for expert, mode, want in cases:
             r, _ = self.run_("Do the thing.", expert=expert, mode=mode)
             self.assertEqual(r["agent"]["id"], want, (expert, mode))

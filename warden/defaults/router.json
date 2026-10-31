@@ -109,9 +109,9 @@
   "fallback_agent": "assistant",
   "agents": {
     "voice_home": {
-      "label": "Home & voice",
-      "harness": "Hermes",
-      "desc": "Sully's profile: devices, timers, music, quick personal requests",
+      "label": "Sully · home",
+      "harness": "Hermes · sully",
+      "desc": "Sully handles it: devices, timers, music, quick personal requests",
       "experts": [
         "home"
       ],
@@ -125,7 +125,30 @@
       "executors": [
         {
           "model": "qwen3.8-flash",
-          "via": "Hermes · sully profile",
+          "via": "Hermes · sully (does it)",
+          "needs": [
+            "hermes"
+          ]
+        }
+      ]
+    },
+    "iris": {
+      "label": "Iris · eyes",
+      "harness": "Hermes · iris",
+      "axis": "vision",
+      "desc": "Sully pings Iris: screenshots, UI, photos, diagrams; vision and files only",
+      "experts": [
+        "design"
+      ],
+      "modes": [
+        "answer",
+        "make",
+        "plan"
+      ],
+      "executors": [
+        {
+          "model": "qwen3.8-flash",
+          "via": "Sully → ping-bot iris",
           "needs": [
             "hermes"
           ]
@@ -184,8 +207,7 @@
         "software",
         "devops",
         "security",
-        "data",
-        "design"
+        "data"
       ],
       "modes": [
         "plan"
@@ -213,10 +235,10 @@
       ]
     },
     "research": {
-      "label": "Web research",
-      "harness": "Hermes",
+      "label": "Scout · research",
+      "harness": "Hermes · scout",
       "axis": "knowledge",
-      "desc": "current information from the web",
+      "desc": "Sully pings Scout: sourced lookups and current information from the web",
       "experts": [
         "software",
         "devops",
@@ -234,7 +256,7 @@
       "executors": [
         {
           "model": "qwen3.8-flash",
-          "via": "Hermes · web tools",
+          "via": "Sully → ping-bot scout",
           "needs": [
             "hermes"
           ]
@@ -250,9 +272,9 @@
       ]
     },
     "assistant": {
-      "label": "General assistant",
-      "harness": "Hermes",
-      "desc": "writing, advice, explanations, everyday tasks",
+      "label": "Sully · desk",
+      "harness": "Hermes · sully",
+      "desc": "Sully handles writing, advice, explanations, everyday tasks",
       "experts": [
         "writing",
         "research",
@@ -268,7 +290,7 @@
       "executors": [
         {
           "model": "qwen3.8-flash",
-          "via": "Hermes",
+          "via": "Hermes · sully (does it)",
           "needs": [
             "hermes"
           ]

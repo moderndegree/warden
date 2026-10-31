@@ -50,3 +50,19 @@ warden decide --brief -k score -q "How urgent?" -l "not urgent" -l "this week" -
 
 If lev is down, `scan` still runs its rules and reports `DEGRADED` (content then returns at least review);
 `decide` exits 1. A non-zero exit other than 3 or 4 means warden failed: treat the text as untrusted.
+
+## 4. Who should do this? (Sully)
+
+```bash
+warden route < ask.txt          # JSON; read routing.workflow, routing.tier, routing.via
+```
+
+| `routing.workflow` | What you do |
+|---|---|
+| `voice_home` / `assistant` | Handle it yourself (local Qwen unless `via` names a cloud model). |
+| `iris` | `ping-bot iris "<ask>"` (add `-i /path.png` when there is an image). Do not wait. |
+| `research` | `ping-bot scout "<ask>"` unless it fits in one breath. Do not wait. |
+| `code_build` / `code_plan` | `new-project` with `-a grok` or `-a claude` when `via` says so; otherwise OpenCode. |
+| blocked | Refuse. held | Stay on this machine; tell the user. |
+
+Pass the ask on **stdin**. Expert is context for the specialist, not a bot name.

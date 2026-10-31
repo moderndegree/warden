@@ -434,7 +434,8 @@ async function walk() {
       }
       const ev = queue.shift();
       apply(ev);
-      if (PACED.has(ev.type)) await sleep(Number($("pace").value));
+      const pace = Number($("pace").value);
+      if (pace && PACED.has(ev.type)) await sleep(pace);
     }
   })();
 
