@@ -11,7 +11,9 @@ import logging
 import time
 
 from . import config, rules, telemetry
-from .lev import Lev, DecisionError, fit, frame
+from . import backends
+from .backends import DecisionError
+from .framing import fit, frame
 
 KINDS = ("yes_no", "choice", "score")
 
@@ -52,7 +54,7 @@ def decide(question, kind="yes_no", items=(), options=None, levels=None, context
     if len(items) > dc["max_items"]:
         raise ValueError(f"too many items ({len(items)} > {dc['max_items']})")
     q = {"q": _question(question, kind, options, levels)}
-    lev = lev or Lev(dm)
+    lev = lev or backends.make(dm)
     t0 = time.monotonic()
     out, calls, lev_ms, tokens, error = [], 0, 0, 0, None
     for i, item in enumerate(items):

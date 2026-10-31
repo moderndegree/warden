@@ -12,7 +12,9 @@ import time
 from collections import OrderedDict
 
 from . import __version__, config, rules, telemetry
-from .lev import Lev, DecisionError, chunks, frame
+from . import backends
+from .backends import DecisionError
+from .framing import chunks, frame
 
 BOUNDARIES = ("prompt", "content", "outbound")
 _cache, _cache_lock = OrderedDict(), threading.Lock()
@@ -61,7 +63,7 @@ def guard_events(text, boundary="prompt", cfg=None, lev=None, use_lev=True, alwa
         raise ValueError(f"boundary must be one of {BOUNDARIES}")
     cfg = cfg or config.load("guard.json")
     b, dm = cfg["boundaries"][boundary], cfg["decision_model"]
-    lev = lev or Lev(dm)
+    lev = lev or backends.make(dm)
     t0 = time.monotonic()
     now = lambda: round((time.monotonic() - t0) * 1000, 1)
     st = {"calls": 0, "ms": 0, "tokens": 0}

@@ -15,7 +15,8 @@ from collections import OrderedDict
 from . import availability, config
 from .classify import choice_result as _choice, level_result as _level, state as classify_state
 from .guard import guard_events
-from .lev import Lev, DecisionError
+from . import backends
+from .backends import DecisionError
 from .router_logic import (agent_axis, choose_agent, choose_tier, decide_route, routing_questions, rules_local,
                            score_executors, score_question)
 
@@ -158,7 +159,7 @@ def route_events(text, m=None, gcfg=None, lev=None, status=None):
     explicit = any(x is not None for x in (m, gcfg, lev))
     m = m or config.load("router.json")
     gcfg = gcfg or config.load("guard.json")
-    lev = lev or Lev(gcfg["decision_model"])
+    lev = lev or backends.make(gcfg["decision_model"])
     status = status if status is not None else availability.check(m)
     key = None
     if not explicit:

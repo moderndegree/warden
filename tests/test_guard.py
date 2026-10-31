@@ -140,16 +140,13 @@ class Guard(unittest.TestCase):
             inspect("x", "sideways", self.cfg, StubLev())
 
     def test_cache(self):
+        from unittest import mock
         from warden import guard
         lev = StubLev()
-        orig = guard.Lev
-        guard.Lev = lambda cfg: lev
-        try:
+        with mock.patch("warden.backends.make", return_value=lev):
             a = guard.inspect("cache me: write a sort function")
             n = len(lev.asked)
             b = guard.inspect("cache me: write a sort function")
-        finally:
-            guard.Lev = orig
         self.assertFalse(a["cached"])
         self.assertTrue(b["cached"])
         self.assertEqual(len(lev.asked), n)

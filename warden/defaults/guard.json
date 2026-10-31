@@ -1,6 +1,8 @@
 {
   "_comment": "warden guard config. Reloaded on every call. Boundaries: prompt = what a person sends an agent; content = untrusted text an agent is about to read (web pages, email, files, tool output); outbound = text about to leave this machine for a cloud model.",
+  "_decision_model_comment": "backend: systemone (a /v1/systemone endpoint such as lev), openai_compat (any OpenAI-compatible chat API; add api_key_env, extra_body), rules_only (no model), or module:Class. Thresholds below were tuned on lev: run evals/analyze.py with --decision-model to calibrate another backend.",
   "decision_model": {
+    "backend": "systemone",
     "url": "http://127.0.0.1:8200/v1/systemone",
     "model": "lev",
     "timeout_s": 8,
