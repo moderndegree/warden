@@ -1,8 +1,8 @@
 """What can actually run right now: local services, CLIs, and sign-ins. Local checks only.
 
 HTTP checks go to loopback /health endpoints; nothing calls a paid or remote API. Auth checks look at whether a
-sign-in exists on disk (file present; optionally a key or field present). They never return or log the values,
-and can't tell whether a token has been revoked server-side.
+sign-in exists on disk (file present; optionally a key or field present) and, with "expires", whether it has
+expired. They never return or log token values, and can't tell whether a token was revoked server-side.
 
 Config: router.json "availability" (checks + ttl_s); models and executors list what they need in "needs".
 """
@@ -50,7 +50,39 @@ def _auth(c):
         return False, f"no {c['key']} credentials in {c['file']}"
     if c.get("field") and not any(isinstance(v, dict) and v.get(c["field"]) for v in d.values()):
         return False, f"not signed in (no {c['field']} in {c['file']})"
+    if c.get("expires"):
+        when = _expiry(d, c["expires"])
+        if when is None:
+            return False, f"can't tell when the sign-in expires (no {c['expires']} in {c['file']})"
+        left = when - time.time()
+        if left <= 0:
+            return False, f"sign-in expired {_ago(-left)} ago (sign in again)"
+        return True, f"signed in (expires in {_ago(left)})"
     return True, "signed in"
+
+
+def _expiry(d, key):
+    """Epoch seconds from `key` anywhere in the sign-in file (top level or one level down). Accepts epoch seconds,
+    epoch milliseconds, or an ISO-8601 time. Only the timestamp is read; tokens are never touched."""
+    import datetime
+    vals = [d.get(key)] + [v.get(key) for v in d.values() if isinstance(v, dict)]
+    for v in vals:
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            return v / 1000 if v > 1e11 else float(v)
+        if isinstance(v, str):
+            try:
+                return datetime.datetime.fromisoformat(v.replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                continue
+    return None
+
+
+def _ago(secs):
+    secs = int(secs)
+    for unit, n in (("d", 86400), ("h", 3600), ("min", 60)):
+        if secs >= n:
+            return f"{secs // n} {unit}"
+    return f"{secs} s"
 
 
 def _bin(c):

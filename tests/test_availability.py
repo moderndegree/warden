@@ -69,6 +69,26 @@ class Checks(unittest.TestCase):
         up, why = av._auth(c)
         self.assertEqual((up, why), (True, "signed in"))
 
+    def test_auth_expiry(self):
+        import time
+        f = self.dir / "auth.json"
+        c = {"file": str(f), "field": "refresh_token", "expires": "expires_at"}
+        f.write_text(json.dumps({"u": {"refresh_token": "SECRET", "expires_at": time.time() - 7200}}))
+        up, why = av._auth(c)
+        self.assertFalse(up)
+        self.assertIn("expired 2 h ago", why)
+        self.assertNotIn("SECRET", why)
+        f.write_text(json.dumps({"u": {"refresh_token": "SECRET", "expires_at": int((time.time() + 3 * 86400) * 1000)}}))
+        up, why = av._auth(c)                                    # epoch milliseconds
+        self.assertTrue(up)
+        self.assertIn("expires in 2 d", why)
+        f.write_text(json.dumps({"refresh_token": "SECRET", "expires_at": "2000-01-01T00:00:00Z", "u": {"refresh_token": "x"}}))
+        self.assertFalse(av._auth(c)[0])                         # ISO time, top level
+        f.write_text(json.dumps({"u": {"refresh_token": "SECRET"}}))
+        up, why = av._auth(c)
+        self.assertFalse(up)
+        self.assertIn("can't tell", why)
+
     def test_auth_key_and_presence(self):
         f = self.dir / "auth.json"
         f.write_text(json.dumps({"xai": {}}))
