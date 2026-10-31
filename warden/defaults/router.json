@@ -503,7 +503,9 @@
         "kind": "auth",
         "bin": "grok",
         "file": "~/.grok/auth.json",
-        "field": "refresh_token"
+        "field": "refresh_token",
+        "expires": "expires_at",
+        "stale_after_s": 604800
       },
       "claude": {
         "label": "Claude Code",

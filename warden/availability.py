@@ -55,9 +55,12 @@ def _auth(c):
         if when is None:
             return False, f"can't tell when the sign-in expires (no {c['expires']} in {c['file']})"
         left = when - time.time()
-        if left <= 0:
-            return False, f"sign-in expired {_ago(-left)} ago (sign in again)"
-        return True, f"signed in (expires in {_ago(left)})"
+        if left > 0:
+            return True, f"signed in (expires in {_ago(left)})"
+        grace = c.get("stale_after_s")         # access tokens that the CLI refreshes on its own
+        if grace is not None and -left < grace:
+            return True, f"signed in (token refreshes on next use; last refreshed {_ago(-left)} ago)"
+        return False, f"sign-in likely lapsed: last refreshed {_ago(-left)} ago (sign in again)"
     return True, "signed in"
 
 

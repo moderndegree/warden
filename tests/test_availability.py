@@ -76,7 +76,10 @@ class Checks(unittest.TestCase):
         f.write_text(json.dumps({"u": {"refresh_token": "SECRET", "expires_at": time.time() - 7200}}))
         up, why = av._auth(c)
         self.assertFalse(up)
-        self.assertIn("expired 2 h ago", why)
+        self.assertIn("lapsed: last refreshed 2 h ago", why)
+        up, why = av._auth({**c, "stale_after_s": 86400})       # short-lived token the CLI refreshes itself
+        self.assertTrue(up)
+        self.assertIn("refreshes on next use", why)
         self.assertNotIn("SECRET", why)
         f.write_text(json.dumps({"u": {"refresh_token": "SECRET", "expires_at": int((time.time() + 3 * 86400) * 1000)}}))
         up, why = av._auth(c)                                    # epoch milliseconds
