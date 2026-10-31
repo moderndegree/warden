@@ -21,27 +21,29 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from warden import config, guard  # noqa: E402
-from warden.lev import Lev  # noqa: E402
+from warden import backends  # noqa: E402
 
 EVALS = Path(__file__).resolve().parent
 SETS = ["gandalf", "jailbreak", "neuralchemy", "pairs", "safeguard", "ipi", "web"]
 FLAG = {"review", "block"}
 
 
-class CachedLev(Lev):
+class CachedLev:
+    """Caches answers per (backend, model, state, questions), so re-runs and threshold sweeps are free."""
     def __init__(self, cfg, db):
-        super().__init__(cfg)
+        self.inner = backends.make(cfg)
+        self.who = [cfg.get("backend", "systemone"), cfg.get("model", "")]
         self.db = sqlite3.connect(db)
         self.db.execute("create table if not exists c (k text primary key, v text)")
         self.hits = self.misses = 0
 
     def ask(self, state, questions):
-        k = hashlib.sha256(json.dumps([state, questions], sort_keys=True).encode()).hexdigest()
+        k = hashlib.sha256(json.dumps([state, questions] if self.who[0] == "systemone" else [*self.who, state, questions], sort_keys=True).encode()).hexdigest()
         row = self.db.execute("select v from c where k=?", (k,)).fetchone()
         if row:
             self.hits += 1
             return json.loads(row[0]), 0, {"input_tokens": 0}
-        a, ms, usage = super().ask(state, questions)
+        a, ms, usage = self.inner.ask(state, questions)
         self.db.execute("insert or replace into c values (?,?)", (k, json.dumps(a)))
         self.db.commit()
         self.misses += 1
@@ -148,14 +150,18 @@ def main():
     ap.add_argument("--misses", type=int, default=0, help="print N missed attacks and N false positives (tune only)")
     ap.add_argument("--grid", action="store_true", help="threshold grid (tune only)")
     ap.add_argument("--cats", action="store_true")
+    ap.add_argument("--decision-model", metavar="JSON", help="override guard.json decision_model keys, e.g. "
+                    "'{\"backend\": \"openai_compat\", \"url\": \"http://127.0.0.1:11434/v1\", \"model\": \"qwen3:4b\"}'")
     a = ap.parse_args()
     cfg = config.load("guard.json")
+    if a.decision_model:
+        cfg["decision_model"] = {**cfg["decision_model"], **json.loads(a.decision_model)}
     lev = CachedLev(cfg["decision_model"], EVALS / "cache.sqlite")
     items = load(a.split, a.per_set)
     scored = score(items, cfg, lev)
 
     show(metrics(replay(scored, cfg, lev_on=False)), f"[{a.split}] rules only · n={len(scored)}")
-    show(metrics(replay(scored, cfg)), f"[{a.split}] rules + lev (medium {cfg['thresholds']['medium']}, high {cfg['thresholds']['high']})")
+    show(metrics(replay(scored, cfg)), f"[{a.split}] rules + {cfg['decision_model'].get('backend', 'systemone')} (medium {cfg['thresholds']['medium']}, high {cfg['thresholds']['high']})")
     if a.cats:
         categories(scored)
 

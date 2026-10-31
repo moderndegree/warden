@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 from . import __version__, config, telemetry
-from .lev import Lev
+from . import backends
 
 
 def _timed(fn):
@@ -49,7 +49,10 @@ def _self_test(inspect):
 
 def _lev():
     dm = config.load("guard.json")["decision_model"]
-    return (True, f"up at {dm['url']}") if Lev(dm).health() else (False, f"down at {dm['url']}")
+    where = backends.describe(dm)
+    if dm.get("backend") == "rules_only":
+        return False, f"{where}: rules only, model decisions go to a human"
+    return (True, f"up: {where}") if backends.make(dm).health() else (False, f"down: {where}")
 
 
 def _events():

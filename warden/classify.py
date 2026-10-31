@@ -11,7 +11,9 @@ import logging
 import time
 
 from . import config, rules, telemetry
-from .lev import Lev, DecisionError, frame
+from . import backends
+from .backends import DecisionError
+from .framing import frame
 from .router_logic import choose_agent, routing_questions, score_question
 
 
@@ -37,7 +39,7 @@ def state(text, m):
 def classify(text, sensitivity=False, guard=False, m=None, gcfg=None, lev=None):
     m = m or config.load("router.json")
     gcfg = gcfg or config.load("guard.json")
-    lev = lev or Lev(gcfg["decision_model"])
+    lev = lev or backends.make(gcfg["decision_model"])
     t0 = time.monotonic()
     res = {"expert": None, "mode": None, "sensitivity": None, "workflow": None, "security": None,
            "stopped": False, "error": None}
